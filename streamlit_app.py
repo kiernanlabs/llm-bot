@@ -294,81 +294,108 @@ if st.button("Research Companies"):
         with st.spinner("Researching companies using multiple AI models..."):
             # Create a progress section
             st.markdown("### Progress")
-            progress_container = st.container()
             
             # Set number of runs per model
             runs_per_model = 5
+            total_runs = runs_per_model * 3  # 3 models (OpenAI, Claude, Gemini)
             
             # Initialize results containers
             all_results_list = []
             
+            # Pre-create all expanders to show the full queue
+            expanders = {}
+            for model_name in ["OpenAI", "Claude", "Gemini"]:
+                expanders[model_name] = {}
+                st.markdown(f"#### {model_name}")
+                
+                # Create expanders for each run
+                for run_num in range(1, runs_per_model + 1):
+                    run_id = f"{model_name}_run{run_num}"
+                    # Create expander with pending status
+                    expanders[model_name][run_num] = st.expander(
+                        f"⏳ {model_name} - Run {run_num}/{runs_per_model}: Pending", 
+                        expanded=False
+                    )
+                    with expanders[model_name][run_num]:
+                        st.info("This run is queued and will execute in sequence.")
+            
             # Run each model multiple times
             for model_name in ["OpenAI", "Claude", "Gemini"]:
-                # Create a progress status for this model
-                model_progress = progress_container.empty()
-                model_progress.info(f"{model_name}: Starting {runs_per_model} runs...")
-                
                 # Run the model multiple times
                 for run_num in range(1, runs_per_model + 1):
-                    run_progress = progress_container.empty()
-                    run_progress.info(f"{model_name} - Run {run_num}/{runs_per_model}: Querying...")
+                    run_id = f"{model_name}_run{run_num}"
+                    
+                    # Update expander to show it's in progress
+                    expander = expanders[model_name][run_num]
+                    expander.header(f"🔄 {model_name} - Run {run_num}/{runs_per_model}: In Progress")
+                    
+                    # Prepare for results
+                    success = False
+                    result = None
+                    error_msg = None
                     
                     try:
-                        # Call the appropriate model
-                        if model_name == "OpenAI":
-                            result = call_openai(get_prompt(query), f"{model_name}_run{run_num}")
-                        elif model_name == "Claude":
-                            result = call_anthropic(get_prompt(query), f"{model_name}_run{run_num}")
-                        else:  # Gemini
-                            result = call_google(get_prompt(query), f"{model_name}_run{run_num}")
-                        
-                        # Check if we got a valid result
-                        if result:
-                            run_progress.success(f"{model_name} - Run {run_num}/{runs_per_model}: Complete")
+                        # Call the appropriate model inside the expander
+                        with expander:
+                            if model_name == "OpenAI":
+                                result = call_openai(get_prompt(query), run_id)
+                            elif model_name == "Claude":
+                                result = call_anthropic(get_prompt(query), run_id)
+                            else:  # Gemini
+                                result = call_google(get_prompt(query), run_id)
                             
-                            # Process the result based on its format
-                            df = pd.DataFrame()
-                            
-                            if model_name == "OpenAI" and "companies" in result:
-                                df = pd.DataFrame(result["companies"])
-                            elif "companies" in result:
-                                df = pd.DataFrame(result["companies"])
-                            elif isinstance(result, list):
-                                df = pd.DataFrame(result)
-                            elif result:
-                                df = pd.DataFrame([result])
-                            
-                            # Add source metadata to the results
-                            if not df.empty:
-                                # Normalize column names
-                                column_map = {}
-                                for col in df.columns:
-                                    if col.lower() == "rank":
-                                        column_map[col] = "Rank"
-                                    elif col.lower() in ["company", "company name", "name"]:
-                                        column_map[col] = "Company Name"
-                                    elif col.lower() in ["url", "website", "link"]:
-                                        column_map[col] = "URL"
-                                    elif col.lower() in ["commentary", "differentiators", "commentary on differentiators"]:
-                                        column_map[col] = "Commentary on Differentiators"
-                                
-                                # Rename columns if needed
-                                if column_map:
-                                    df.rename(columns=column_map, inplace=True)
-                                
-                                # Add source information
-                                df["Source Model"] = model_name
-                                df["Run Number"] = run_num
-                                
-                                # Add to all results
-                                all_results_list.append(df)
-                        else:
-                            run_progress.error(f"{model_name} - Run {run_num}/{runs_per_model}: Failed")
+                            # Process the result if valid
+                            if result:
+                                success = True
+                            else:
+                                error_msg = "Model returned no data"
                     except Exception as e:
-                        run_progress.error(f"{model_name} - Run {run_num}/{runs_per_model}: Error - {str(e)[:50]}...")
-                
-                # Update overall model progress
-                model_progress.success(f"{model_name}: All runs completed")
+                        error_msg = str(e)
+                    
+                    # Update expander header based on result
+                    if success:
+                        expander.header(f"✅ {model_name} - Run {run_num}/{runs_per_model}: Complete")
+                        
+                        # Process the result based on its format
+                        df = pd.DataFrame()
+                        
+                        if model_name == "OpenAI" and "companies" in result:
+                            df = pd.DataFrame(result["companies"])
+                        elif "companies" in result:
+                            df = pd.DataFrame(result["companies"])
+                        elif isinstance(result, list):
+                            df = pd.DataFrame(result)
+                        elif result:
+                            df = pd.DataFrame([result])
+                        
+                        # Add source metadata to the results
+                        if not df.empty:
+                            # Normalize column names
+                            column_map = {}
+                            for col in df.columns:
+                                if col.lower() == "rank":
+                                    column_map[col] = "Rank"
+                                elif col.lower() in ["company", "company name", "name"]:
+                                    column_map[col] = "Company Name"
+                                elif col.lower() in ["url", "website", "link"]:
+                                    column_map[col] = "URL"
+                                elif col.lower() in ["commentary", "differentiators", "commentary on differentiators"]:
+                                    column_map[col] = "Commentary on Differentiators"
+                            
+                            # Rename columns if needed
+                            if column_map:
+                                df.rename(columns=column_map, inplace=True)
+                            
+                            # Add source information
+                            df["Source Model"] = model_name
+                            df["Run Number"] = run_num
+                            
+                            # Add to all results
+                            all_results_list.append(df)
+                    else:
+                        expander.header(f"❌ {model_name} - Run {run_num}/{runs_per_model}: Failed")
+                        with expander:
+                            st.error(f"Error: {error_msg}")
             
             # Combine all results
             if all_results_list:
@@ -381,14 +408,13 @@ if st.button("Research Companies"):
                 st.markdown("### Run Summary")
                 summary_cols = st.columns(3)
                 
-                total_runs = len(all_results_list)
-                summary_cols[0].metric("Total Runs", f"{total_runs}")
+                completed_runs = len(all_results_list)
+                summary_cols[0].metric("Completed Runs", f"{completed_runs}/{total_runs}")
                 summary_cols[1].metric("Unique Companies", f"{all_results['Normalized URL'].nunique()}")
                 summary_cols[2].metric("Data Points", f"{len(all_results)}")
                 
                 # Group by URL to get stats
                 url_stats = {}
-                total_runs = runs_per_model * 3  # 3 models
                 
                 for norm_url in all_results["Normalized URL"].unique():
                     # Get all entries for this normalized URL
@@ -476,5 +502,14 @@ if st.button("Research Companies"):
                 st.markdown("### Complete Dataset")
                 if not all_results.empty:
                     st.dataframe(all_results)
+                    
+                    # Add CSV download button
+                    csv = all_results.to_csv(index=False)
+                    st.download_button(
+                        label="Download Full Dataset as CSV",
+                        data=csv,
+                        file_name=f"company_research_{query[:20].replace(' ', '_').lower()}.csv",
+                        mime="text/csv"
+                    )
     else:
         st.warning("Please enter a research query.")
