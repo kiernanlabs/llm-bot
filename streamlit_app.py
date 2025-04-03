@@ -735,7 +735,7 @@ if st.button("Research Companies"):
                         "Filter by Model",
                         options=["OpenAI", "Claude", "Gemini", "All"],
                         default=["All"],
-                        key="debug_model_filter"
+                        key="debug_model_filter_initial"
                     )
                 
                 with log_filter_cols[1]:
@@ -743,11 +743,11 @@ if st.button("Research Companies"):
                         "Filter by Level",
                         options=["INFO", "WARNING", "ERROR", "DEBUG", "All"],
                         default=["All"],
-                        key="debug_level_filter"
+                        key="debug_level_filter_initial"
                     )
                 
                 with log_filter_cols[2]:
-                    clear_logs = st.button("Clear Logs")
+                    clear_logs = st.button("Clear Logs", key="clear_logs_initial")
                     if clear_logs:
                         st.session_state.debug_logs = []
                         st.experimental_rerun()
@@ -942,7 +942,7 @@ if st.session_state.has_run_query and st.session_state.all_results is not None:
                 "Filter by Model",
                 options=["OpenAI", "Claude", "Gemini", "All"],
                 default=["All"],
-                key="debug_model_filter"
+                key="debug_model_filter_persistent"
             )
         
         with log_filter_cols[1]:
@@ -950,11 +950,11 @@ if st.session_state.has_run_query and st.session_state.all_results is not None:
                 "Filter by Level",
                 options=["INFO", "WARNING", "ERROR", "DEBUG", "All"],
                 default=["All"],
-                key="debug_level_filter"
+                key="debug_level_filter_persistent"
             )
         
         with log_filter_cols[2]:
-            clear_logs = st.button("Clear Logs")
+            clear_logs = st.button("Clear Logs", key="clear_logs_persistent")
             if clear_logs:
                 st.session_state.debug_logs = []
                 st.experimental_rerun()
