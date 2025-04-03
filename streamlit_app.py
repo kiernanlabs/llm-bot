@@ -32,65 +32,70 @@ query = st.text_input(
 
 # Function to format the prompt
 def get_prompt(query):
-    return f"""Based on the following query, provide a list of 10 companies in JSON format.
-    Each company should have: Rank (1-10), Company Name, URL, and Commentary on Differentiators.
-    Query: {query}
+    return f"""Based on the following query, provide a list of 10 companies.
+    For each company, include the rank (1-10), company name, URL, and commentary on what differentiates this company.
     
-    IMPORTANT: Respond ONLY with a JSON array. Do not include any other text, markdown, or formatting.
-    The response must be a valid JSON array of objects with these exact fields:
-    [
-        {{
-            "Rank": number,
-            "Company Name": "string",
-            "URL": "string",
-            "Commentary on Differentiators": "string"
-        }}
-    ]
+    Query: {query}
     """
 
 # Function to call OpenAI
 def call_openai(prompt):
-    with st.expander("OpenAI Debug Output", expanded=True):
+    with st.expander("OpenAI Debug Output", expanded=False):
         try:
-            st.write("Debug: Sending request to OpenAI...")
+            st.write("Debug: Sending request to OpenAI using responses API...")
             st.write(f"Debug: Using model: gpt-4o")
-            st.write(f"Debug: Prompt: {prompt}")
             
-            response = openai_client.chat.completions.create(
+            # Define the JSON schema for the companies list
+            companies_schema = {
+                "type": "object",
+                "properties": {
+                    "companies": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "Rank": {"type": "integer", "minimum": 1, "maximum": 10},
+                                "Company Name": {"type": "string"},
+                                "URL": {"type": "string"},
+                                "Commentary on Differentiators": {"type": "string"}
+                            },
+                            "required": ["Rank", "Company Name", "URL", "Commentary on Differentiators"]
+                        }
+                    }
+                },
+                "required": ["companies"],
+                "additionalProperties": False
+            }
+            
+            # Use the responses API with schema validation
+            response = openai_client.responses.create(
                 model="gpt-4o",
-                messages=[{"role": "user", "content": prompt}],
-                response_format={"type": "json_object"}
+                input=[{"role": "user", "content": prompt}],
+                text={
+                    "format": {
+                        "type": "json_schema",
+                        "name": "company_research",
+                        "schema": companies_schema,
+                        "strict": True
+                    }
+                }
             )
-            st.write("Debug: Received response from OpenAI")
-            st.write(f"Debug: Response object: {response}")
-            content = response.choices[0].message.content
-            st.write(f"Debug: Content extracted: {content}")
             
-            if not content:
-                st.error("OpenAI returned empty response")
-                return None
-                
-            # Try to parse the JSON response
-            try:
-                parsed_content = json.loads(content)
-                st.write("Debug: Successfully parsed JSON response")
-                return parsed_content
-            except json.JSONDecodeError as e:
-                st.write(f"Debug: JSON parsing failed with error: {str(e)}")
-                # If that fails, try to extract JSON from the text
-                import re
-                json_match = re.search(r'\{.*\}', content, re.DOTALL)
-                if json_match:
-                    st.write("Debug: Found JSON in text using regex")
-                    return json.loads(json_match.group())
-                else:
-                    st.error("Could not find valid JSON in OpenAI response")
-                    st.markdown("**Raw Response:**")
-                    st.code(content)
-                    return None
+            st.write("Debug: Received response from OpenAI")
+            
+            # Extract and parse the structured JSON response
+            parsed_content = json.loads(response.output_text)
+            
+            # Show successful response for debugging
+            st.write("Debug: Successfully parsed JSON response")
+            return parsed_content
+            
+        except json.JSONDecodeError as e:
+            st.error(f"JSON parsing error: {str(e)}")
+            return None
         except Exception as e:
             st.error(f"OpenAI API Error: {str(e)}")
-            st.write(f"Debug: Exception occurred: {str(e)}")
+            st.write(f"Debug: Exception details: {str(e)}")
             return None
 
 # Function to call Anthropic
@@ -186,11 +191,17 @@ if st.button("Research Companies"):
                     st.error("Gemini query failed")
             
             # Create DataFrames for each model
-            dfs = {
-                "GPT-4": pd.DataFrame([openai_results] if isinstance(openai_results, dict) else (openai_results or [])),
-                "Claude": pd.DataFrame([anthropic_results] if isinstance(anthropic_results, dict) else (anthropic_results or [])),
-                "Gemini": pd.DataFrame([google_results] if isinstance(google_results, dict) else (google_results or []))
-            }
+            dfs = {}
+            
+            if openai_results and "companies" in openai_results:
+                dfs["GPT-4"] = pd.DataFrame(openai_results["companies"])
+            elif openai_results:
+                dfs["GPT-4"] = pd.DataFrame(openai_results)
+            else:
+                dfs["GPT-4"] = pd.DataFrame([])
+                
+            dfs["Claude"] = pd.DataFrame([anthropic_results] if isinstance(anthropic_results, dict) else (anthropic_results or []))
+            dfs["Gemini"] = pd.DataFrame([google_results] if isinstance(google_results, dict) else (google_results or []))
             
             # Display results in a table
             st.markdown("### Results")
