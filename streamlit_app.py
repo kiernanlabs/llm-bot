@@ -81,8 +81,9 @@ def add_json_instructions(base_prompt):
     """
 
 # Function to call OpenAI
-def call_openai(prompt):
-    with st.expander("OpenAI Debug Output", expanded=False):
+def call_openai(prompt, run_id=None):
+    key_suffix = f"_{run_id}" if run_id is not None else ""
+    with st.expander(f"OpenAI Debug Output{key_suffix}", expanded=False):
         try:
             st.write("Debug: Sending request to OpenAI...")
             st.write(f"Debug: Using model: {openai_model}")
@@ -134,7 +135,7 @@ def call_openai(prompt):
             st.text(f"{content[:500]}{'...' if len(content) > 500 else ''}")
             
             # Show full response in a collapsible section using st.checkbox + conditional display
-            show_full = st.checkbox("Show Full Response", key="openai_full")
+            show_full = st.checkbox("Show Full Response", key=f"openai_full{key_suffix}")
             if show_full:
                 st.write("### Full Raw Response:")
                 st.code(content)
@@ -154,8 +155,9 @@ def call_openai(prompt):
             return None
 
 # Function to call Anthropic
-def call_anthropic(prompt):
-    with st.expander("Claude Debug Output", expanded=False):
+def call_anthropic(prompt, run_id=None):
+    key_suffix = f"_{run_id}" if run_id is not None else ""
+    with st.expander(f"Claude Debug Output{key_suffix}", expanded=False):
         try:
             # Add JSON formatting instructions for Anthropic
             formatted_prompt = add_json_instructions(prompt)
@@ -179,7 +181,7 @@ def call_anthropic(prompt):
             st.text(f"{content[:500]}{'...' if len(content) > 500 else ''}")
             
             # Show full response in a collapsible section using st.checkbox + conditional display
-            show_full = st.checkbox("Show Full Response", key="claude_full")
+            show_full = st.checkbox("Show Full Response", key=f"claude_full{key_suffix}")
             if show_full:
                 st.write("### Full Raw Response:")
                 st.code(content)
@@ -200,7 +202,7 @@ def call_anthropic(prompt):
                     st.write(f"Debug: Found JSON in text using regex (preview): {json_str[:200]}{'...' if len(json_str) > 200 else ''}")
                     
                     # Show extracted JSON
-                    show_extracted = st.checkbox("Show Extracted JSON", key="claude_json")
+                    show_extracted = st.checkbox("Show Extracted JSON", key=f"claude_json{key_suffix}")
                     if show_extracted:
                         st.write("### Full Extracted JSON:")
                         st.code(json_str)
@@ -219,8 +221,9 @@ def call_anthropic(prompt):
             return None
 
 # Function to call Google
-def call_google(prompt):
-    with st.expander("Gemini Debug Output", expanded=False):
+def call_google(prompt, run_id=None):
+    key_suffix = f"_{run_id}" if run_id is not None else ""
+    with st.expander(f"Gemini Debug Output{key_suffix}", expanded=False):
         try:
             # Add JSON formatting instructions for Google
             formatted_prompt = add_json_instructions(prompt)
@@ -244,7 +247,7 @@ def call_google(prompt):
             st.text(f"{content[:500]}{'...' if len(content) > 500 else ''}")
             
             # Show full response in a collapsible section using st.checkbox + conditional display
-            show_full = st.checkbox("Show Full Response", key="gemini_full")
+            show_full = st.checkbox("Show Full Response", key=f"gemini_full{key_suffix}")
             if show_full:
                 st.write("### Full Raw Response:")
                 st.code(content)
@@ -264,7 +267,7 @@ def call_google(prompt):
                     st.write(f"Debug: Found JSON in text using regex (preview): {json_str[:200]}{'...' if len(json_str) > 200 else ''}")
                     
                     # Show extracted JSON
-                    show_extracted = st.checkbox("Show Extracted JSON", key="gemini_json")
+                    show_extracted = st.checkbox("Show Extracted JSON", key=f"gemini_json{key_suffix}")
                     if show_extracted:
                         st.write("### Full Extracted JSON:")
                         st.code(json_str)
@@ -331,11 +334,11 @@ if st.button("Research Companies"):
                     try:
                         # Call the appropriate model
                         if model_name == "OpenAI":
-                            result = call_openai(get_prompt(query))
+                            result = call_openai(get_prompt(query), f"{model_name}_run{run_num}")
                         elif model_name == "Claude":
-                            result = call_anthropic(get_prompt(query))
+                            result = call_anthropic(get_prompt(query), f"{model_name}_run{run_num}")
                         else:  # Gemini
-                            result = call_google(get_prompt(query))
+                            result = call_google(get_prompt(query), f"{model_name}_run{run_num}")
                         
                         # Check if we got a valid result
                         if result:
