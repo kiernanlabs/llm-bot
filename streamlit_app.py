@@ -4,6 +4,10 @@ import json
 from openai import OpenAI
 from anthropic import Anthropic
 import google.generativeai as genai
+import urllib.parse
+import re
+import concurrent.futures
+import time
 
 # Initialize API clients using Streamlit secrets
 openai_client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
@@ -123,7 +127,19 @@ def call_openai(prompt):
             st.write("Debug: Received response from OpenAI")
             
             # Extract and parse the structured JSON response
-            parsed_content = json.loads(response.output_text)
+            content = response.output_text
+            
+            # Show response preview
+            st.write("### Response Preview (first 500 chars):")
+            st.text(f"{content[:500]}{'...' if len(content) > 500 else ''}")
+            
+            # Show full response in a collapsible section using st.checkbox + conditional display
+            show_full = st.checkbox("Show Full Response", key="openai_full")
+            if show_full:
+                st.write("### Full Raw Response:")
+                st.code(content)
+            
+            parsed_content = json.loads(content)
             
             # Show successful response for debugging
             st.write("Debug: Successfully parsed JSON response")
@@ -157,7 +173,16 @@ def call_anthropic(prompt):
             
             # Extract the text content and ensure it's properly formatted
             content = response.content[0].text.strip()
-            st.write(f"Debug: Raw response content: {content[:500]}{'...' if len(content) > 500 else ''}")
+            
+            # Show response preview
+            st.write("### Response Preview (first 500 chars):")
+            st.text(f"{content[:500]}{'...' if len(content) > 500 else ''}")
+            
+            # Show full response in a collapsible section using st.checkbox + conditional display
+            show_full = st.checkbox("Show Full Response", key="claude_full")
+            if show_full:
+                st.write("### Full Raw Response:")
+                st.code(content)
             
             # Try to find JSON content within the response
             try:
@@ -172,12 +197,17 @@ def call_anthropic(prompt):
                 json_match = re.search(r'\{.*\}', content, re.DOTALL)
                 if json_match:
                     json_str = json_match.group()
-                    st.write(f"Debug: Found JSON in text using regex: {json_str[:200]}{'...' if len(json_str) > 200 else ''}")
+                    st.write(f"Debug: Found JSON in text using regex (preview): {json_str[:200]}{'...' if len(json_str) > 200 else ''}")
+                    
+                    # Show extracted JSON
+                    show_extracted = st.checkbox("Show Extracted JSON", key="claude_json")
+                    if show_extracted:
+                        st.write("### Full Extracted JSON:")
+                        st.code(json_str)
+                        
                     return json.loads(json_str)
                 else:
                     st.error("Could not find valid JSON in Anthropic response")
-                    st.markdown("**Raw Response:**")
-                    st.code(content)
                     return None
         except Exception as e:
             st.error(f"Anthropic API Error: {str(e)}")
@@ -204,7 +234,16 @@ def call_google(prompt):
                 return None
                 
             content = response.text.strip()
-            st.write(f"Debug: Raw response content: {content[:500]}{'...' if len(content) > 500 else ''}")
+            
+            # Show response preview
+            st.write("### Response Preview (first 500 chars):")
+            st.text(f"{content[:500]}{'...' if len(content) > 500 else ''}")
+            
+            # Show full response in a collapsible section using st.checkbox + conditional display
+            show_full = st.checkbox("Show Full Response", key="gemini_full")
+            if show_full:
+                st.write("### Full Raw Response:")
+                st.code(content)
             
             # Try to parse the JSON response
             try:
@@ -218,17 +257,43 @@ def call_google(prompt):
                 json_match = re.search(r'\{.*\}', content, re.DOTALL)
                 if json_match:
                     json_str = json_match.group()
-                    st.write(f"Debug: Found JSON in text using regex: {json_str[:200]}{'...' if len(json_str) > 200 else ''}")
+                    st.write(f"Debug: Found JSON in text using regex (preview): {json_str[:200]}{'...' if len(json_str) > 200 else ''}")
+                    
+                    # Show extracted JSON
+                    show_extracted = st.checkbox("Show Extracted JSON", key="gemini_json")
+                    if show_extracted:
+                        st.write("### Full Extracted JSON:")
+                        st.code(json_str)
+                        
                     return json.loads(json_str)
                 else:
                     st.error("Could not find valid JSON in Google response")
-                    st.markdown("**Raw Response:**")
-                    st.code(content)
                     return None
         except Exception as e:
             st.error(f"Google API Error: {str(e)}")
             st.write(f"Debug: Exception details: {str(e)}")
             return None
+
+# Function to normalize URLs (extract just the domain)
+def normalize_url(url):
+    try:
+        # Parse the URL
+        parsed_url = urllib.parse.urlparse(url)
+        
+        # Extract the domain (netloc)
+        domain = parsed_url.netloc
+        
+        # Remove 'www.' prefix if present
+        domain = re.sub(r'^www\.', '', domain)
+        
+        # If we couldn't extract a domain, return the original URL
+        if not domain:
+            return url
+            
+        return domain
+    except:
+        # If there's any error in parsing, return the original URL
+        return url
 
 # Submit button
 if st.button("Research Companies"):
@@ -236,32 +301,77 @@ if st.button("Research Companies"):
         with st.spinner("Researching companies using multiple AI models..."):
             # Create a progress section
             st.markdown("### Progress")
-            progress_cols = st.columns(3)
+            progress_placeholder = st.empty()
+            progress_cols = progress_placeholder.columns(3)
             
-            # Get results from each model with progress updates
-            with progress_cols[0]:
-                st.info("Querying GPT-4...")
-                openai_results = call_openai(get_prompt(query))
-                if openai_results:
-                    st.success("GPT-4 results received")
-                else:
-                    st.error("GPT-4 query failed")
+            # Initialize progress status
+            progress_status = {
+                "OpenAI": {"status": "Querying...", "result": None},
+                "Claude": {"status": "Querying...", "result": None},
+                "Gemini": {"status": "Querying...", "result": None}
+            }
             
-            with progress_cols[1]:
-                st.info("Querying Claude...")
-                anthropic_results = call_anthropic(get_prompt(query))
-                if anthropic_results:
-                    st.success("Claude results received")
-                else:
-                    st.error("Claude query failed")
+            # Display initial progress
+            for i, model in enumerate(["OpenAI", "Claude", "Gemini"]):
+                progress_cols[i].info(f"{model}: {progress_status[model]['status']}")
             
-            with progress_cols[2]:
-                st.info("Querying Gemini...")
-                google_results = call_google(get_prompt(query))
-                if google_results:
-                    st.success("Gemini results received")
-                else:
-                    st.error("Gemini query failed")
+            # Define worker functions for each model
+            def query_openai():
+                try:
+                    result = call_openai(get_prompt(query))
+                    progress_status["OpenAI"]["status"] = "Complete"
+                    progress_status["OpenAI"]["result"] = result
+                    # Update progress display
+                    progress_cols[0].success(f"OpenAI: {progress_status['OpenAI']['status']}")
+                except Exception as e:
+                    error_msg = str(e)
+                    progress_status["OpenAI"]["status"] = f"Error: {error_msg[:50]}..." if len(error_msg) > 50 else f"Error: {error_msg}"
+                    progress_cols[0].error(f"OpenAI: {progress_status['OpenAI']['status']}")
+            
+            def query_anthropic():
+                try:
+                    result = call_anthropic(get_prompt(query))
+                    progress_status["Claude"]["status"] = "Complete"
+                    progress_status["Claude"]["result"] = result
+                    # Update progress display
+                    progress_cols[1].success(f"Claude: {progress_status['Claude']['status']}")
+                except Exception as e:
+                    error_msg = str(e)
+                    progress_status["Claude"]["status"] = f"Error: {error_msg[:50]}..." if len(error_msg) > 50 else f"Error: {error_msg}"
+                    progress_cols[1].error(f"Claude: {progress_status['Claude']['status']}")
+            
+            def query_gemini():
+                try:
+                    result = call_google(get_prompt(query))
+                    progress_status["Gemini"]["status"] = "Complete"
+                    progress_status["Gemini"]["result"] = result
+                    # Update progress display
+                    progress_cols[2].success(f"Gemini: {progress_status['Gemini']['status']}")
+                except Exception as e:
+                    error_msg = str(e)
+                    progress_status["Gemini"]["status"] = f"Error: {error_msg[:50]}..." if len(error_msg) > 50 else f"Error: {error_msg}"
+                    progress_cols[2].error(f"Gemini: {progress_status['Gemini']['status']}")
+            
+            # Run all queries in parallel
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                executor.submit(query_openai)
+                executor.submit(query_anthropic)
+                executor.submit(query_gemini)
+                
+                # Wait for all tasks to complete (with a nicer UI experience)
+                completed = False
+                while not completed:
+                    # Check if all tasks are done
+                    statuses = [progress_status[model]["status"] for model in ["OpenAI", "Claude", "Gemini"]]
+                    completed = all(status != "Querying..." for status in statuses)
+                    
+                    if not completed:
+                        time.sleep(0.1)  # Small delay to prevent UI freezing
+            
+            # Get results from progress_status
+            openai_results = progress_status["OpenAI"]["result"]
+            anthropic_results = progress_status["Claude"]["result"]
+            google_results = progress_status["Gemini"]["result"]
             
             # Create DataFrames for each model
             dfs = {}
@@ -325,9 +435,12 @@ if st.button("Research Companies"):
                 url_stats = {}
                 total_models = len([df for df in dfs.values() if not df.empty])
                 
-                for url in all_results["URL"].unique():
-                    # Get all entries for this URL
-                    url_entries = all_results[all_results["URL"] == url]
+                # Add a normalized URL column for grouping
+                all_results["Normalized URL"] = all_results["URL"].apply(normalize_url)
+                
+                for norm_url in all_results["Normalized URL"].unique():
+                    # Get all entries for this normalized URL
+                    url_entries = all_results[all_results["Normalized URL"] == norm_url]
                     
                     # Calculate metrics
                     models_appeared_in = url_entries["Source Model"].nunique()
@@ -337,15 +450,19 @@ if st.button("Research Companies"):
                     # Get company name (use most common one if different across models)
                     company_name = url_entries["Company Name"].mode()[0]
                     
+                    # Get the most common actual URL for display
+                    display_url = url_entries["URL"].mode()[0]
+                    
                     # Store the commentaries from each model
                     commentaries = {}
                     for _, row in url_entries.iterrows():
                         commentaries[row["Source Model"]] = row["Commentary on Differentiators"]
                     
                     # Store the stats
-                    url_stats[url] = {
+                    url_stats[norm_url] = {
                         "Company Name": company_name,
-                        "URL": url,
+                        "URL": display_url,
+                        "Normalized URL": norm_url,
                         "Appearance %": appearance_pct,
                         "Average Rank": avg_rank,
                         "Commentaries": commentaries
@@ -385,7 +502,16 @@ if st.button("Research Companies"):
             with st.expander("View Raw Results"):
                 st.markdown("### Raw Results")
                 
+                # Display URL normalization info
+                st.markdown("### URL Normalization")
+                if not all_results.empty:
+                    url_mapping = all_results[["URL", "Normalized URL"]].drop_duplicates()
+                    st.dataframe(url_mapping)
+                else:
+                    st.info("No URLs to display")
+                
                 # Display raw results for each model
+                st.markdown("### API Responses")
                 for model, results in [
                     ("GPT-4", openai_results),
                     ("Claude", anthropic_results),
