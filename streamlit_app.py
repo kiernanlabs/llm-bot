@@ -112,10 +112,25 @@ def call_google(prompt):
 if st.button("Research Companies"):
     if query:
         with st.spinner("Researching companies using multiple AI models..."):
-            # Get results from each model
+            # Create progress indicators for each model
+            progress_containers = {
+                "GPT-4": st.empty(),
+                "Claude": st.empty(),
+                "Gemini": st.empty()
+            }
+            
+            # Get results from each model with progress updates
+            progress_containers["GPT-4"].info("Querying GPT-4...")
             openai_results = call_openai(get_prompt(query))
+            progress_containers["GPT-4"].success("GPT-4 results received") if openai_results else progress_containers["GPT-4"].error("GPT-4 query failed")
+            
+            progress_containers["Claude"].info("Querying Claude...")
             anthropic_results = call_anthropic(get_prompt(query))
+            progress_containers["Claude"].success("Claude results received") if anthropic_results else progress_containers["Claude"].error("Claude query failed")
+            
+            progress_containers["Gemini"].info("Querying Gemini...")
             google_results = call_google(get_prompt(query))
+            progress_containers["Gemini"].success("Gemini results received") if google_results else progress_containers["Gemini"].error("Gemini query failed")
             
             # Create DataFrames for each model
             dfs = {
