@@ -291,8 +291,9 @@ def normalize_url(url):
 if st.button("Research Companies"):
     if query:
         with st.spinner("Researching companies using multiple AI models..."):
-            # Create a progress section
-            st.markdown("### Progress")
+            # Create layout for different sections
+            progress_container = st.container()
+            results_container = st.container()
             
             # Set number of runs per model
             runs_per_model = 5
@@ -301,208 +302,213 @@ if st.button("Research Companies"):
             # Initialize results containers
             all_results_list = []
             
-            # Create progress bars
-            progress_bar = st.progress(0)
-            status_text = st.empty()
+            # Create tabs for progress and results
+            tab1, tab2 = st.tabs(["Progress", "Results (will appear when processing completes)"])
             
-            # Initialize counters
-            completed_runs = 0
-            
-            # Run each model multiple times
-            for model_name in ["OpenAI", "Claude", "Gemini"]:
-                st.markdown(f"#### {model_name}")
+            with tab1:
+                # Create progress bars in the progress tab
+                st.markdown("### Processing Progress")
+                progress_bar = st.progress(0)
+                status_text = st.empty()
                 
-                # Run the model multiple times
-                for run_num in range(1, runs_per_model + 1):
-                    run_id = f"{model_name}_run{run_num}"
-                    
-                    # Update status
-                    status_text.text(f"Processing: {model_name} - Run {run_num}/{runs_per_model}")
-                    
-                    # Create a single expander for this run
-                    with st.expander(f"🔄 {model_name} - Run {run_num}/{runs_per_model}", expanded=False):
-                        st.markdown(f"**{model_name} - Run {run_num}/{runs_per_model}**")
+                # Initialize counters
+                completed_runs = 0
+                
+                # Create a compact view for all models
+                for model_name in ["OpenAI", "Claude", "Gemini"]:
+                    with st.expander(f"#### {model_name} Runs", expanded=False):
+                        # Create placeholders for each run's status
+                        run_statuses = {}
+                        for run_num in range(1, runs_per_model + 1):
+                            run_statuses[run_num] = st.empty()
+                            run_statuses[run_num].info(f"Run {run_num}/{runs_per_model}: Waiting...")
                         
-                        # Execute the query
-                        try:
-                            # Call the appropriate model
-                            if model_name == "OpenAI":
-                                result = call_openai(get_prompt(query), run_id)
-                            elif model_name == "Claude":
-                                result = call_anthropic(get_prompt(query), run_id)
-                            else:  # Gemini
-                                result = call_google(get_prompt(query), run_id)
+                        # Run the model multiple times
+                        for run_num in range(1, runs_per_model + 1):
+                            run_id = f"{model_name}_run{run_num}"
                             
-                            # Process the result if valid
-                            if result:
-                                st.success(f"✅ **{model_name} - Run {run_num}/{runs_per_model} completed successfully**")
+                            # Update status
+                            status_text.text(f"Processing: {model_name} - Run {run_num}/{runs_per_model} ({completed_runs+1}/{total_runs} total)")
+                            run_statuses[run_num].info(f"Run {run_num}/{runs_per_model}: In Progress...")
+                            
+                            # Execute the query without an additional expander
+                            try:
+                                # Call the appropriate model
+                                if model_name == "OpenAI":
+                                    result = call_openai(get_prompt(query), run_id)
+                                elif model_name == "Claude":
+                                    result = call_anthropic(get_prompt(query), run_id)
+                                else:  # Gemini
+                                    result = call_google(get_prompt(query), run_id)
                                 
-                                # Process the result based on its format
-                                df = pd.DataFrame()
-                                
-                                if model_name == "OpenAI" and "companies" in result:
-                                    df = pd.DataFrame(result["companies"])
-                                elif "companies" in result:
-                                    df = pd.DataFrame(result["companies"])
-                                elif isinstance(result, list):
-                                    df = pd.DataFrame(result)
-                                elif result:
-                                    df = pd.DataFrame([result])
-                                
-                                # Add source metadata to the results
-                                if not df.empty:
-                                    # Normalize column names
-                                    column_map = {}
-                                    for col in df.columns:
-                                        if col.lower() == "rank":
-                                            column_map[col] = "Rank"
-                                        elif col.lower() in ["company", "company name", "name"]:
-                                            column_map[col] = "Company Name"
-                                        elif col.lower() in ["url", "website", "link"]:
-                                            column_map[col] = "URL"
-                                        elif col.lower() in ["commentary", "differentiators", "commentary on differentiators"]:
-                                            column_map[col] = "Commentary on Differentiators"
+                                # Process the result if valid
+                                if result:
+                                    run_statuses[run_num].success(f"Run {run_num}/{runs_per_model}: Complete ✅")
                                     
-                                    # Rename columns if needed
-                                    if column_map:
-                                        df.rename(columns=column_map, inplace=True)
+                                    # Process the result based on its format
+                                    df = pd.DataFrame()
                                     
-                                    # Add source information
-                                    df["Source Model"] = model_name
-                                    df["Run Number"] = run_num
+                                    if model_name == "OpenAI" and "companies" in result:
+                                        df = pd.DataFrame(result["companies"])
+                                    elif "companies" in result:
+                                        df = pd.DataFrame(result["companies"])
+                                    elif isinstance(result, list):
+                                        df = pd.DataFrame(result)
+                                    elif result:
+                                        df = pd.DataFrame([result])
                                     
-                                    # Show a preview of the data
-                                    st.write("**Results Preview:**")
-                                    st.dataframe(df.head())
-                                    
-                                    # Add to all results
-                                    all_results_list.append(df)
-                            else:
-                                st.error(f"❌ **{model_name} - Run {run_num}/{runs_per_model} failed: No valid results returned**")
-                        except Exception as e:
-                            st.error(f"❌ **{model_name} - Run {run_num}/{runs_per_model} failed with error: {str(e)}**")
-                    
-                    # Update progress
-                    completed_runs += 1
-                    progress_bar.progress(completed_runs / total_runs)
+                                    # Add source metadata to the results
+                                    if not df.empty:
+                                        # Normalize column names
+                                        column_map = {}
+                                        for col in df.columns:
+                                            if col.lower() == "rank":
+                                                column_map[col] = "Rank"
+                                            elif col.lower() in ["company", "company name", "name"]:
+                                                column_map[col] = "Company Name"
+                                            elif col.lower() in ["url", "website", "link"]:
+                                                column_map[col] = "URL"
+                                            elif col.lower() in ["commentary", "differentiators", "commentary on differentiators"]:
+                                                column_map[col] = "Commentary on Differentiators"
+                                        
+                                        # Rename columns if needed
+                                        if column_map:
+                                            df.rename(columns=column_map, inplace=True)
+                                        
+                                        # Add source information
+                                        df["Source Model"] = model_name
+                                        df["Run Number"] = run_num
+                                        
+                                        # Add to all results
+                                        all_results_list.append(df)
+                                else:
+                                    run_statuses[run_num].error(f"Run {run_num}/{runs_per_model}: Failed ❌ (No valid results)")
+                            except Exception as e:
+                                run_statuses[run_num].error(f"Run {run_num}/{runs_per_model}: Error ❌ ({str(e)[:50]}...)")
+                            
+                            # Update progress
+                            completed_runs += 1
+                            progress_bar.progress(completed_runs / total_runs)
+                
+                # Clear the primary progress indicators when done
+                status_text.text(f"✅ Processing complete! {completed_runs}/{total_runs} runs finished")
             
-            # Clear the progress indicators when done
-            status_text.empty()
-            progress_bar.empty()
-            
-            # Combine all results
+            # After all processing, switch to the results tab and display results
             if all_results_list:
+                # Combine all results
                 all_results = pd.concat(all_results_list, ignore_index=True)
                 
                 # Add normalized URL for grouping
                 all_results["Normalized URL"] = all_results["URL"].apply(normalize_url)
                 
-                # Display run summary
-                st.markdown("### Run Summary")
-                summary_cols = st.columns(3)
-                
-                completed_runs = len(all_results_list)
-                summary_cols[0].metric("Completed Runs", f"{completed_runs}/{total_runs}")
-                summary_cols[1].metric("Unique Companies", f"{all_results['Normalized URL'].nunique()}")
-                summary_cols[2].metric("Data Points", f"{len(all_results)}")
-                
-                # Group by URL to get stats
-                url_stats = {}
-                
-                for norm_url in all_results["Normalized URL"].unique():
-                    # Get all entries for this normalized URL
-                    url_entries = all_results[all_results["Normalized URL"] == norm_url]
+                with tab2:
+                    # Display run summary
+                    st.markdown("### Run Summary")
+                    summary_cols = st.columns(3)
                     
-                    # Calculate metrics across all runs
-                    runs_appeared_in = len(url_entries)
-                    appearance_pct = (runs_appeared_in / total_runs) * 100
-                    avg_rank = url_entries["Rank"].mean()
+                    total_companies = all_results["Normalized URL"].nunique()
+                    summary_cols[0].metric("Completed Runs", f"{completed_runs}/{total_runs}")
+                    summary_cols[1].metric("Unique Companies", f"{total_companies}")
+                    summary_cols[2].metric("Data Points", f"{len(all_results)}")
                     
-                    # Calculate visibility score (10 points for #1, 9 points for #2, etc.)
-                    visibility_score = 0
-                    for _, row in url_entries.iterrows():
-                        rank = row["Rank"]
-                        # Award points based on rank (max 10 points for rank 1)
-                        if 1 <= rank <= 10:
-                            visibility_score += (11 - rank)
+                    # Group by URL to get stats
+                    url_stats = {}
                     
-                    # Get company name (use most common one if different across runs)
-                    company_name = url_entries["Company Name"].mode()[0]
+                    for norm_url in all_results["Normalized URL"].unique():
+                        # Get all entries for this normalized URL
+                        url_entries = all_results[all_results["Normalized URL"] == norm_url]
+                        
+                        # Calculate metrics across all runs
+                        runs_appeared_in = len(url_entries)
+                        appearance_pct = (runs_appeared_in / total_runs) * 100
+                        avg_rank = url_entries["Rank"].mean()
+                        
+                        # Calculate visibility score (10 points for #1, 9 points for #2, etc.)
+                        visibility_score = 0
+                        for _, row in url_entries.iterrows():
+                            rank = row["Rank"]
+                            # Award points based on rank (max 10 points for rank 1)
+                            if 1 <= rank <= 10:
+                                visibility_score += (11 - rank)
+                        
+                        # Get company name (use most common one if different across runs)
+                        company_name = url_entries["Company Name"].mode()[0]
+                        
+                        # Get the most common actual URL for display
+                        display_url = url_entries["URL"].mode()[0]
+                        
+                        # Store the commentaries from each model and run
+                        commentaries = {}
+                        for _, row in url_entries.iterrows():
+                            model_run = f"{row['Source Model']} (Run {row['Run Number']})"
+                            commentaries[model_run] = row["Commentary on Differentiators"]
+                        
+                        # Store the stats
+                        url_stats[norm_url] = {
+                            "Company Name": company_name,
+                            "URL": display_url,
+                            "Normalized URL": norm_url,
+                            "Runs Appeared": runs_appeared_in,
+                            "Appearance %": appearance_pct,
+                            "Average Rank": avg_rank,
+                            "Visibility Score": visibility_score,
+                            "Commentaries": commentaries
+                        }
                     
-                    # Get the most common actual URL for display
-                    display_url = url_entries["URL"].mode()[0]
+                    # Convert to dataframe and sort
+                    stats_df = pd.DataFrame(url_stats.values())
+                    stats_df = stats_df.sort_values(by=["Visibility Score", "Appearance %", "Average Rank"], 
+                                                   ascending=[False, False, True])
                     
-                    # Store the commentaries from each model and run
-                    commentaries = {}
-                    for _, row in url_entries.iterrows():
-                        model_run = f"{row['Source Model']} (Run {row['Run Number']})"
-                        commentaries[model_run] = row["Commentary on Differentiators"]
+                    # Display the consolidated results
+                    st.markdown("### Consolidated Results")
                     
-                    # Store the stats
-                    url_stats[norm_url] = {
-                        "Company Name": company_name,
-                        "URL": display_url,
-                        "Normalized URL": norm_url,
-                        "Runs Appeared": runs_appeared_in,
-                        "Appearance %": appearance_pct,
-                        "Average Rank": avg_rank,
-                        "Visibility Score": visibility_score,
-                        "Commentaries": commentaries
-                    }
-                
-                # Convert to dataframe and sort
-                stats_df = pd.DataFrame(url_stats.values())
-                stats_df = stats_df.sort_values(by=["Visibility Score", "Appearance %", "Average Rank"], 
-                                               ascending=[False, False, True])
-                
-                # Display the consolidated results
-                st.markdown("### Consolidated Results")
-                
-                # Display the table
-                for _, row in stats_df.iterrows():
-                    cols = st.columns([3, 1, 1, 1, 2])
+                    # Display the table
+                    for _, row in stats_df.iterrows():
+                        cols = st.columns([3, 1, 1, 1, 2])
+                        
+                        # Column 1: Company Name and URL
+                        cols[0].markdown(f"**{row['Company Name']}**")
+                        cols[0].markdown(f"[{row['URL']}]({row['URL']})")
+                        
+                        # Column 2: Appearance %
+                        cols[1].metric("Appearance", f"{row['Appearance %']:.0f}%")
+                        
+                        # Column 3: Average Rank
+                        cols[2].metric("Avg Rank", f"{row['Average Rank']:.1f}")
+                        
+                        # Column 4: Visibility Score
+                        cols[3].metric("Visibility", f"{row['Visibility Score']:.0f}")
+                        
+                        # Column 5: Commentaries Expander
+                        with cols[4].expander("View Differentiators"):
+                            for model_run, commentary in row["Commentaries"].items():
+                                st.markdown(f"**{model_run}:**")
+                                st.markdown(commentary)
+                                st.markdown("---")
                     
-                    # Column 1: Company Name and URL
-                    cols[0].markdown(f"**{row['Company Name']}**")
-                    cols[0].markdown(f"[{row['URL']}]({row['URL']})")
+                    # Add download button for the complete dataset
+                    st.markdown("### Download Data")
+                    csv = all_results.to_csv(index=False)
+                    st.download_button(
+                        label="💾 Download Full Dataset as CSV",
+                        data=csv,
+                        file_name=f"company_research_{query[:20].replace(' ', '_').lower()}.csv",
+                        mime="text/csv",
+                        help="Download the complete raw dataset for all runs and models"
+                    )
                     
-                    # Column 2: Appearance %
-                    cols[1].metric("Appearance", f"{row['Appearance %']:.0f}%")
-                    
-                    # Column 3: Average Rank
-                    cols[2].metric("Avg Rank", f"{row['Average Rank']:.1f}")
-                    
-                    # Column 4: Visibility Score
-                    cols[3].metric("Visibility", f"{row['Visibility Score']:.0f}")
-                    
-                    # Column 5: Commentaries Expander
-                    with cols[4].expander("View Differentiators"):
-                        for model_run, commentary in row["Commentaries"].items():
-                            st.markdown(f"**{model_run}:**")
-                            st.markdown(commentary)
-                            st.markdown("---")
-                
-                # Add download button for the complete dataset
-                st.markdown("### Download Data")
-                csv = all_results.to_csv(index=False)
-                st.download_button(
-                    label="💾 Download Full Dataset as CSV",
-                    data=csv,
-                    file_name=f"company_research_{query[:20].replace(' ', '_').lower()}.csv",
-                    mime="text/csv",
-                    help="Download the complete raw dataset for all runs and models"
-                )
-                
-                # Display raw data for debugging
-                with st.expander("View Raw Data"):
-                    st.markdown("### URL Normalization")
-                    url_mapping = all_results[["URL", "Normalized URL"]].drop_duplicates()
-                    st.dataframe(url_mapping)
-                    
-                    st.markdown("### Complete Dataset")
-                    st.dataframe(all_results)
+                    # Display raw data for debugging
+                    with st.expander("View Raw Data"):
+                        st.markdown("### URL Normalization")
+                        url_mapping = all_results[["URL", "Normalized URL"]].drop_duplicates()
+                        st.dataframe(url_mapping)
+                        
+                        st.markdown("### Complete Dataset")
+                        st.dataframe(all_results)
             else:
-                st.error("All model runs failed to return valid results. Please try again.")
-                st.stop()
+                with tab2:
+                    st.error("All model runs failed to return valid results. Please try again.")
+                    st.stop()
     else:
         st.warning("Please enter a research query.")
