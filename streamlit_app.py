@@ -112,25 +112,34 @@ def call_google(prompt):
 if st.button("Research Companies"):
     if query:
         with st.spinner("Researching companies using multiple AI models..."):
-            # Create progress indicators for each model
-            progress_containers = {
-                "GPT-4": st.empty(),
-                "Claude": st.empty(),
-                "Gemini": st.empty()
-            }
+            # Create a progress section
+            st.markdown("### Progress")
+            progress_cols = st.columns(3)
             
             # Get results from each model with progress updates
-            progress_containers["GPT-4"].info("Querying GPT-4...")
-            openai_results = call_openai(get_prompt(query))
-            progress_containers["GPT-4"].success("GPT-4 results received") if openai_results else progress_containers["GPT-4"].error("GPT-4 query failed")
+            with progress_cols[0]:
+                st.info("Querying GPT-4...")
+                openai_results = call_openai(get_prompt(query))
+                if openai_results:
+                    st.success("GPT-4 results received")
+                else:
+                    st.error("GPT-4 query failed")
             
-            progress_containers["Claude"].info("Querying Claude...")
-            anthropic_results = call_anthropic(get_prompt(query))
-            progress_containers["Claude"].success("Claude results received") if anthropic_results else progress_containers["Claude"].error("Claude query failed")
+            with progress_cols[1]:
+                st.info("Querying Claude...")
+                anthropic_results = call_anthropic(get_prompt(query))
+                if anthropic_results:
+                    st.success("Claude results received")
+                else:
+                    st.error("Claude query failed")
             
-            progress_containers["Gemini"].info("Querying Gemini...")
-            google_results = call_google(get_prompt(query))
-            progress_containers["Gemini"].success("Gemini results received") if google_results else progress_containers["Gemini"].error("Gemini query failed")
+            with progress_cols[2]:
+                st.info("Querying Gemini...")
+                google_results = call_google(get_prompt(query))
+                if google_results:
+                    st.success("Gemini results received")
+                else:
+                    st.error("Gemini query failed")
             
             # Create DataFrames for each model
             dfs = {
@@ -166,5 +175,21 @@ if st.button("Research Companies"):
                         )
                     else:
                         col.markdown("")
+            
+            # Display raw results for debugging
+            with st.expander("View Raw Results"):
+                st.markdown("### Raw Results")
+                
+                # Display raw results for each model
+                for model, results in [
+                    ("GPT-4", openai_results),
+                    ("Claude", anthropic_results),
+                    ("Gemini", google_results)
+                ]:
+                    st.markdown(f"**{model} Raw Response:**")
+                    if results:
+                        st.json(results)
+                    else:
+                        st.error(f"No results from {model}")
     else:
         st.warning("Please enter a research query.")
