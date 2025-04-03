@@ -80,8 +80,8 @@ def add_json_instructions(base_prompt):
     Do not include backticks or code blocks (```).
     """
 
-# Function to call OpenAI with embedded output instead of expanders
-def call_openai_embedded(prompt, run_id=None):
+# Function to call OpenAI
+def call_openai(prompt, run_id=None):
     try:
         st.write("🔄 **Sending request to OpenAI...**")
         st.write(f"Using model: {openai_model}")
@@ -132,13 +132,14 @@ def call_openai_embedded(prompt, run_id=None):
         st.write("**Response Preview:**")
         st.text(f"{content[:500]}{'...' if len(content) > 500 else ''}")
         
-        # Always show full response
-        with st.expander("View Full Response", expanded=False):
+        # Toggle for full response
+        if st.checkbox("Show Full Response", key=f"openai_full_{run_id}"):
+            st.write("**Full Response:**")
             st.code(content)
         
         parsed_content = json.loads(content)
         
-        # Show successful response for debugging
+        # Show successful response
         st.write("✅ **Successfully parsed JSON response**")
         return parsed_content
         
@@ -150,8 +151,8 @@ def call_openai_embedded(prompt, run_id=None):
         st.write(f"Debug: Exception details: {str(e)}")
         return None
 
-# Function to call Anthropic with embedded output
-def call_anthropic_embedded(prompt, run_id=None):
+# Function to call Anthropic
+def call_anthropic(prompt, run_id=None):
     try:
         # Add JSON formatting instructions for Anthropic
         formatted_prompt = add_json_instructions(prompt)
@@ -174,8 +175,9 @@ def call_anthropic_embedded(prompt, run_id=None):
         st.write("**Response Preview:**")
         st.text(f"{content[:500]}{'...' if len(content) > 500 else ''}")
         
-        # Always show full response
-        with st.expander("View Full Response", expanded=False):
+        # Toggle for full response
+        if st.checkbox("Show Full Response", key=f"claude_full_{run_id}"):
+            st.write("**Full Response:**")
             st.code(content)
         
         # Try to find JSON content within the response
@@ -193,8 +195,9 @@ def call_anthropic_embedded(prompt, run_id=None):
                 json_str = json_match.group()
                 st.write("🔍 **Found JSON in text using regex**")
                 
-                # Always show extracted JSON
-                with st.expander("View Extracted JSON", expanded=False):
+                # Toggle for extracted JSON
+                if st.checkbox("Show Extracted JSON", key=f"claude_json_{run_id}"):
+                    st.write("**Extracted JSON:**")
                     st.code(json_str)
                 
                 return json.loads(json_str)
@@ -206,8 +209,8 @@ def call_anthropic_embedded(prompt, run_id=None):
         st.write(f"Debug: Exception details: {str(e)}")
         return None
 
-# Function to call Google with embedded output
-def call_google_embedded(prompt, run_id=None):
+# Function to call Google
+def call_google(prompt, run_id=None):
     try:
         # Add JSON formatting instructions for Google
         formatted_prompt = add_json_instructions(prompt)
@@ -230,8 +233,9 @@ def call_google_embedded(prompt, run_id=None):
         st.write("**Response Preview:**")
         st.text(f"{content[:500]}{'...' if len(content) > 500 else ''}")
         
-        # Always show full response
-        with st.expander("View Full Response", expanded=False):
+        # Toggle for full response
+        if st.checkbox("Show Full Response", key=f"gemini_full_{run_id}"):
+            st.write("**Full Response:**")
             st.code(content)
         
         # Try to parse the JSON response
@@ -248,8 +252,9 @@ def call_google_embedded(prompt, run_id=None):
                 json_str = json_match.group()
                 st.write("🔍 **Found JSON in text using regex**")
                 
-                # Always show extracted JSON
-                with st.expander("View Extracted JSON", expanded=False):
+                # Toggle for extracted JSON
+                if st.checkbox("Show Extracted JSON", key=f"gemini_json_{run_id}"):
+                    st.write("**Extracted JSON:**")
                     st.code(json_str)
                 
                 return json.loads(json_str)
@@ -302,7 +307,6 @@ if st.button("Research Companies"):
             
             # Initialize counters
             completed_runs = 0
-            total_runs = runs_per_model * 3
             
             # Run each model multiple times
             for model_name in ["OpenAI", "Claude", "Gemini"]:
@@ -319,15 +323,15 @@ if st.button("Research Companies"):
                     with st.expander(f"🔄 {model_name} - Run {run_num}/{runs_per_model}", expanded=False):
                         st.markdown(f"**{model_name} - Run {run_num}/{runs_per_model}**")
                         
-                        # Execute the query and embed the output directly
+                        # Execute the query
                         try:
-                            # Call the appropriate model with embedded output
+                            # Call the appropriate model
                             if model_name == "OpenAI":
-                                result = call_openai_embedded(get_prompt(query), run_id)
+                                result = call_openai(get_prompt(query), run_id)
                             elif model_name == "Claude":
-                                result = call_anthropic_embedded(get_prompt(query), run_id)
+                                result = call_anthropic(get_prompt(query), run_id)
                             else:  # Gemini
-                                result = call_google_embedded(get_prompt(query), run_id)
+                                result = call_google(get_prompt(query), run_id)
                             
                             # Process the result if valid
                             if result:
