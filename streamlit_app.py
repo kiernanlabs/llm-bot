@@ -66,7 +66,23 @@ def call_openai(prompt):
             messages=[{"role": "user", "content": prompt}],
             response_format={"type": "json_object"}
         )
-        return json.loads(response.choices[0].message.content)
+        content = response.choices[0].message.content
+        if not content:
+            st.error("OpenAI returned empty response")
+            return None
+            
+        # Try to parse the JSON response
+        try:
+            return json.loads(content)
+        except json.JSONDecodeError:
+            # If that fails, try to extract JSON from the text
+            import re
+            json_match = re.search(r'\{.*\}', content, re.DOTALL)
+            if json_match:
+                return json.loads(json_match.group())
+            else:
+                st.error("Could not find valid JSON in OpenAI response")
+                return None
     except Exception as e:
         st.error(f"OpenAI API Error: {str(e)}")
         return None
@@ -103,7 +119,25 @@ def call_google(prompt):
     try:
         model = genai.GenerativeModel('gemini-2.0-flash')
         response = model.generate_content(prompt)
-        return json.loads(response.text)
+        
+        if not response or not response.text:
+            st.error("Google returned empty response")
+            return None
+            
+        content = response.text.strip()
+        
+        # Try to parse the JSON response
+        try:
+            return json.loads(content)
+        except json.JSONDecodeError:
+            # If that fails, try to extract JSON from the text
+            import re
+            json_match = re.search(r'\[.*\]', content, re.DOTALL)
+            if json_match:
+                return json.loads(json_match.group())
+            else:
+                st.error("Could not find valid JSON in Google response")
+                return None
     except Exception as e:
         st.error(f"Google API Error: {str(e)}")
         return None
@@ -168,11 +202,11 @@ if st.button("Research Companies"):
                         company_data = df.iloc[row]
                         col.markdown(
                             f"**{company_data['Rank']}. {company_data['Company Name']}**\n\n"
-                            f"[{company_data['URL']}]({company_data['URL']})\n\n"
-                            f"<div title='{company_data['Commentary on Differentiators']}'>"
-                            f"💡 Hover for details</div>",
-                            unsafe_allow_html=True
+                            f"[{company_data['URL']}]({company_data['URL']})"
                         )
+                        with col.expander("View Details"):
+                            st.markdown(f"**Commentary on Differentiators:**")
+                            st.markdown(company_data['Commentary on Differentiators'])
                     else:
                         col.markdown("")
             
