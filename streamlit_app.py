@@ -8,6 +8,7 @@ import urllib.parse
 import re
 import concurrent.futures
 import time
+from datetime import datetime
 
 # Initialize API clients using Streamlit secrets
 openai_client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
@@ -27,6 +28,24 @@ st.markdown("""
 This app uses multiple AI models to research companies based on your query.
 Results will be displayed in a comparative table showing rankings from each model.
 """)
+
+# Initialize debug log container in session state if not present
+if 'debug_logs' not in st.session_state:
+    st.session_state.debug_logs = []
+
+# Function to add a log entry
+def add_debug_log(model, run_id, message, level="INFO", data=None):
+    timestamp = datetime.now().strftime("%H:%M:%S")
+    log_entry = {
+        "timestamp": timestamp,
+        "model": model,
+        "run_id": run_id,
+        "level": level,
+        "message": message,
+        "data": data
+    }
+    st.session_state.debug_logs.append(log_entry)
+    return log_entry
 
 # Model selection
 with st.expander("Model Settings", expanded=False):
@@ -82,10 +101,10 @@ def add_json_instructions(base_prompt):
 
 # Function to call OpenAI
 def call_openai(prompt, run_id=None):
+    model_name = "OpenAI"
+    add_debug_log(model_name, run_id, f"Starting request to {model_name} with model: {openai_model}")
+    
     try:
-        st.write("🔄 **Sending request to OpenAI...**")
-        st.write(f"Using model: {openai_model}")
-        
         # Define the JSON schema for the companies list
         companies_schema = {
             "type": "object",
@@ -123,42 +142,35 @@ def call_openai(prompt, run_id=None):
             }
         )
         
-        st.write("✅ **Response received from OpenAI**")
+        add_debug_log(model_name, run_id, "Response received")
         
         # Extract and parse the structured JSON response
         content = response.output_text
         
-        # Show response preview
-        st.write("**Response Preview:**")
-        st.text(f"{content[:500]}{'...' if len(content) > 500 else ''}")
-        
-        # Toggle for full response
-        if st.checkbox("Show Full Response", key=f"openai_full_{run_id}"):
-            st.write("**Full Response:**")
-            st.code(content)
+        # Log the response content
+        add_debug_log(model_name, run_id, "Response preview", data=content[:500] + ('...' if len(content) > 500 else ''))
+        add_debug_log(model_name, run_id, "Full response", level="DEBUG", data=content)
         
         parsed_content = json.loads(content)
+        add_debug_log(model_name, run_id, "Successfully parsed JSON response")
         
-        # Show successful response
-        st.write("✅ **Successfully parsed JSON response**")
         return parsed_content
         
     except json.JSONDecodeError as e:
-        st.error(f"JSON parsing error: {str(e)}")
+        add_debug_log(model_name, run_id, f"JSON parsing error: {str(e)}", level="ERROR")
         return None
     except Exception as e:
-        st.error(f"OpenAI API Error: {str(e)}")
-        st.write(f"Debug: Exception details: {str(e)}")
+        add_debug_log(model_name, run_id, f"API Error: {str(e)}", level="ERROR")
         return None
 
 # Function to call Anthropic
 def call_anthropic(prompt, run_id=None):
+    model_name = "Claude"
+    add_debug_log(model_name, run_id, f"Starting request to {model_name} with model: {anthropic_model}")
+    
     try:
         # Add JSON formatting instructions for Anthropic
         formatted_prompt = add_json_instructions(prompt)
-        
-        st.write("🔄 **Sending request to Anthropic...**")
-        st.write(f"Using model: {anthropic_model}")
         
         response = anthropic_client.messages.create(
             model=anthropic_model,
@@ -166,104 +178,84 @@ def call_anthropic(prompt, run_id=None):
             messages=[{"role": "user", "content": formatted_prompt}]
         )
         
-        st.write("✅ **Response received from Anthropic**")
+        add_debug_log(model_name, run_id, "Response received")
         
         # Extract the text content and ensure it's properly formatted
         content = response.content[0].text.strip()
         
-        # Show response preview
-        st.write("**Response Preview:**")
-        st.text(f"{content[:500]}{'...' if len(content) > 500 else ''}")
-        
-        # Toggle for full response
-        if st.checkbox("Show Full Response", key=f"claude_full_{run_id}"):
-            st.write("**Full Response:**")
-            st.code(content)
+        # Log the response content
+        add_debug_log(model_name, run_id, "Response preview", data=content[:500] + ('...' if len(content) > 500 else ''))
+        add_debug_log(model_name, run_id, "Full response", level="DEBUG", data=content)
         
         # Try to find JSON content within the response
         try:
             # First try direct JSON parsing
             parsed_content = json.loads(content)
-            st.write("✅ **Successfully parsed JSON response**")
+            add_debug_log(model_name, run_id, "Successfully parsed JSON response")
             return parsed_content
         except json.JSONDecodeError as e:
-            st.write(f"⚠️ **JSON parsing failed:** {str(e)}")
+            add_debug_log(model_name, run_id, f"JSON parsing failed: {str(e)}", level="WARNING")
             # If that fails, try to extract JSON from the text
             import re
             json_match = re.search(r'\{.*\}', content, re.DOTALL)
             if json_match:
                 json_str = json_match.group()
-                st.write("🔍 **Found JSON in text using regex**")
-                
-                # Toggle for extracted JSON
-                if st.checkbox("Show Extracted JSON", key=f"claude_json_{run_id}"):
-                    st.write("**Extracted JSON:**")
-                    st.code(json_str)
+                add_debug_log(model_name, run_id, "Found JSON in text using regex")
+                add_debug_log(model_name, run_id, "Extracted JSON", level="DEBUG", data=json_str)
                 
                 return json.loads(json_str)
             else:
-                st.error("❌ **Could not find valid JSON in Anthropic response**")
+                add_debug_log(model_name, run_id, "Could not find valid JSON in response", level="ERROR")
                 return None
     except Exception as e:
-        st.error(f"Anthropic API Error: {str(e)}")
-        st.write(f"Debug: Exception details: {str(e)}")
+        add_debug_log(model_name, run_id, f"API Error: {str(e)}", level="ERROR")
         return None
 
 # Function to call Google
 def call_google(prompt, run_id=None):
+    model_name = "Gemini"
+    add_debug_log(model_name, run_id, f"Starting request to {model_name} with model: {google_model}")
+    
     try:
         # Add JSON formatting instructions for Google
         formatted_prompt = add_json_instructions(prompt)
         
-        st.write("🔄 **Sending request to Google Gemini...**")
-        st.write(f"Using model: {google_model}")
-        
         model = genai.GenerativeModel(google_model)
         response = model.generate_content(formatted_prompt)
         
-        st.write("✅ **Response received from Google**")
+        add_debug_log(model_name, run_id, "Response received")
         
         if not response or not response.text:
-            st.error("❌ **Google returned empty response**")
+            add_debug_log(model_name, run_id, "Empty response received", level="ERROR")
             return None
         
         content = response.text.strip()
         
-        # Show response preview
-        st.write("**Response Preview:**")
-        st.text(f"{content[:500]}{'...' if len(content) > 500 else ''}")
-        
-        # Toggle for full response
-        if st.checkbox("Show Full Response", key=f"gemini_full_{run_id}"):
-            st.write("**Full Response:**")
-            st.code(content)
+        # Log the response content
+        add_debug_log(model_name, run_id, "Response preview", data=content[:500] + ('...' if len(content) > 500 else ''))
+        add_debug_log(model_name, run_id, "Full response", level="DEBUG", data=content)
         
         # Try to parse the JSON response
         try:
             parsed_content = json.loads(content)
-            st.write("✅ **Successfully parsed JSON response**")
+            add_debug_log(model_name, run_id, "Successfully parsed JSON response")
             return parsed_content
         except json.JSONDecodeError as e:
-            st.write(f"⚠️ **JSON parsing failed:** {str(e)}")
+            add_debug_log(model_name, run_id, f"JSON parsing failed: {str(e)}", level="WARNING")
             # If that fails, try to extract JSON from the text
             import re
             json_match = re.search(r'\{.*\}', content, re.DOTALL)
             if json_match:
                 json_str = json_match.group()
-                st.write("🔍 **Found JSON in text using regex**")
-                
-                # Toggle for extracted JSON
-                if st.checkbox("Show Extracted JSON", key=f"gemini_json_{run_id}"):
-                    st.write("**Extracted JSON:**")
-                    st.code(json_str)
+                add_debug_log(model_name, run_id, "Found JSON in text using regex")
+                add_debug_log(model_name, run_id, "Extracted JSON", level="DEBUG", data=json_str)
                 
                 return json.loads(json_str)
             else:
-                st.error("❌ **Could not find valid JSON in Google response**")
+                add_debug_log(model_name, run_id, "Could not find valid JSON in response", level="ERROR")
                 return None
     except Exception as e:
-        st.error(f"Google API Error: {str(e)}")
-        st.write(f"Debug: Exception details: {str(e)}")
+        add_debug_log(model_name, run_id, f"API Error: {str(e)}", level="ERROR")
         return None
 
 # Function to normalize URLs (extract just the domain)
@@ -302,8 +294,8 @@ if st.button("Research Companies"):
             # Initialize results containers
             all_results_list = []
             
-            # Create tabs for progress and results
-            tab1, tab2 = st.tabs(["Progress", "Results (will appear when processing completes)"])
+            # Create tabs for progress, results, and debug logs
+            tab1, tab2, tab3 = st.tabs(["Progress", "Results", "Debug Logs"])
             
             with tab1:
                 # Create progress bars in the progress tab
@@ -331,7 +323,7 @@ if st.button("Research Companies"):
                             status_text.text(f"Processing: {model_name} - Run {run_num}/{runs_per_model} ({completed_runs+1}/{total_runs} total)")
                             run_statuses[run_num].info(f"Run {run_num}/{runs_per_model}: In Progress...")
                             
-                            # Execute the query without an additional expander
+                            # Execute the query without displaying debug output
                             try:
                                 # Call the appropriate model
                                 if model_name == "OpenAI":
@@ -385,6 +377,7 @@ if st.button("Research Companies"):
                                     run_statuses[run_num].error(f"Run {run_num}/{runs_per_model}: Failed ❌ (No valid results)")
                             except Exception as e:
                                 run_statuses[run_num].error(f"Run {run_num}/{runs_per_model}: Error ❌ ({str(e)[:50]}...)")
+                                add_debug_log(model_name, run_id, f"Exception during processing: {str(e)}", level="ERROR")
                             
                             # Update progress
                             completed_runs += 1
@@ -393,7 +386,69 @@ if st.button("Research Companies"):
                 # Clear the primary progress indicators when done
                 status_text.text(f"✅ Processing complete! {completed_runs}/{total_runs} runs finished")
             
-            # After all processing, switch to the results tab and display results
+            # Update the debug logs tab with all collected logs
+            with tab3:
+                st.markdown("### Debug Logs")
+                
+                # Add log filtering options
+                log_filter_cols = st.columns(4)
+                with log_filter_cols[0]:
+                    selected_models = st.multiselect(
+                        "Filter by Model",
+                        options=["OpenAI", "Claude", "Gemini", "All"],
+                        default=["All"]
+                    )
+                
+                with log_filter_cols[1]:
+                    selected_levels = st.multiselect(
+                        "Filter by Level",
+                        options=["INFO", "WARNING", "ERROR", "DEBUG", "All"],
+                        default=["All"]
+                    )
+                
+                with log_filter_cols[2]:
+                    show_content = st.checkbox("Show Full Content", value=False)
+                
+                with log_filter_cols[3]:
+                    clear_logs = st.button("Clear Logs")
+                    if clear_logs:
+                        st.session_state.debug_logs = []
+                        st.experimental_rerun()
+                
+                # Apply filters
+                filtered_logs = st.session_state.debug_logs
+                if "All" not in selected_models:
+                    filtered_logs = [log for log in filtered_logs if log["model"] in selected_models]
+                
+                if "All" not in selected_levels:
+                    filtered_logs = [log for log in filtered_logs if log["level"] in selected_levels]
+                
+                # Display logs in a table
+                if filtered_logs:
+                    log_table = []
+                    for log in filtered_logs:
+                        row = {
+                            "Time": log["timestamp"],
+                            "Model": log["model"],
+                            "Run": log["run_id"],
+                            "Level": log["level"],
+                            "Message": log["message"]
+                        }
+                        log_table.append(row)
+                    
+                    st.dataframe(log_table)
+                    
+                    # Show log content in expandable sections if requested
+                    if show_content:
+                        st.markdown("### Log Content")
+                        for i, log in enumerate(filtered_logs):
+                            if log.get("data"):
+                                with st.expander(f"{log['timestamp']} - {log['model']} - {log['message']}"):
+                                    st.code(log["data"])
+                else:
+                    st.info("No logs matching the selected filters.")
+            
+            # After all processing, show results in the results tab
             if all_results_list:
                 # Combine all results
                 all_results = pd.concat(all_results_list, ignore_index=True)
