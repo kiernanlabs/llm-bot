@@ -51,24 +51,33 @@ def get_prompt(query):
 # Function to call OpenAI
 def call_openai(prompt):
     try:
+        st.write("Debug: Sending request to OpenAI...")
         response = openai_client.chat.completions.create(
             model="gpt-4o",
             messages=[{"role": "user", "content": prompt}],
             response_format={"type": "json_object"}
         )
+        st.write("Debug: Received response from OpenAI")
+        st.write(f"Debug: Response object: {response}")
         content = response.choices[0].message.content
+        st.write(f"Debug: Content extracted: {content}")
+        
         if not content:
             st.error("OpenAI returned empty response")
             return None
             
         # Try to parse the JSON response
         try:
-            return json.loads(content)
-        except json.JSONDecodeError:
+            parsed_content = json.loads(content)
+            st.write("Debug: Successfully parsed JSON response")
+            return parsed_content
+        except json.JSONDecodeError as e:
+            st.write(f"Debug: JSON parsing failed with error: {str(e)}")
             # If that fails, try to extract JSON from the text
             import re
             json_match = re.search(r'\{.*\}', content, re.DOTALL)
             if json_match:
+                st.write("Debug: Found JSON in text using regex")
                 return json.loads(json_match.group())
             else:
                 st.error("Could not find valid JSON in OpenAI response")
@@ -77,6 +86,7 @@ def call_openai(prompt):
                 return None
     except Exception as e:
         st.error(f"OpenAI API Error: {str(e)}")
+        st.write(f"Debug: Exception occurred: {str(e)}")
         return None
 
 # Function to call Anthropic
