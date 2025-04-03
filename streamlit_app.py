@@ -72,6 +72,8 @@ def call_openai(prompt):
                 return json.loads(json_match.group())
             else:
                 st.error("Could not find valid JSON in OpenAI response")
+                st.markdown("**Raw Response:**")
+                st.code(content)
                 return None
     except Exception as e:
         st.error(f"OpenAI API Error: {str(e)}")
@@ -99,6 +101,8 @@ def call_anthropic(prompt):
                 return json.loads(json_match.group())
             else:
                 st.error("Could not find valid JSON in Anthropic response")
+                st.markdown("**Raw Response:**")
+                st.code(content)
                 return None
     except Exception as e:
         st.error(f"Anthropic API Error: {str(e)}")
@@ -127,6 +131,8 @@ def call_google(prompt):
                 return json.loads(json_match.group())
             else:
                 st.error("Could not find valid JSON in Google response")
+                st.markdown("**Raw Response:**")
+                st.code(content)
                 return None
     except Exception as e:
         st.error(f"Google API Error: {str(e)}")
