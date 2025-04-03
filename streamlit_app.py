@@ -307,170 +307,111 @@ def normalize_url(url):
 if st.button("Research Companies"):
     if query:
         with st.spinner("Researching companies using multiple AI models..."):
-            # Create a progress section and status placeholders
+            # Create a progress section
             st.markdown("### Progress")
-            progress_cols = st.columns(3)
+            progress_container = st.container()
             
-            # Set up status placeholders
-            openai_status = progress_cols[0].empty()
-            claude_status = progress_cols[1].empty() 
-            gemini_status = progress_cols[2].empty()
+            # Set number of runs per model
+            runs_per_model = 5
             
-            # Show initial status
-            openai_status.info("OpenAI: Querying...")
-            claude_status.info("Claude: Querying...")
-            gemini_status.info("Gemini: Querying...")
+            # Initialize results containers
+            all_results_list = []
             
-            # Define functions that only handle API calls and return results (no UI updates)
-            def query_openai():
-                try:
-                    return {"status": "Complete", "result": call_openai(get_prompt(query))}
-                except Exception as e:
-                    error_msg = str(e)
-                    return {"status": f"Error: {error_msg[:50]}..." if len(error_msg) > 50 else f"Error: {error_msg}", "result": None}
-            
-            def query_anthropic():
-                try:
-                    return {"status": "Complete", "result": call_anthropic(get_prompt(query))}
-                except Exception as e:
-                    error_msg = str(e)
-                    return {"status": f"Error: {error_msg[:50]}..." if len(error_msg) > 50 else f"Error: {error_msg}", "result": None}
-            
-            def query_gemini():
-                try:
-                    return {"status": "Complete", "result": call_google(get_prompt(query))}
-                except Exception as e:
-                    error_msg = str(e)
-                    return {"status": f"Error: {error_msg[:50]}..." if len(error_msg) > 50 else f"Error: {error_msg}", "result": None}
-            
-            # Use ThreadPoolExecutor to run queries in parallel, but don't update UI from threads
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                # Submit tasks
-                future_openai = executor.submit(query_openai)
-                future_anthropic = executor.submit(query_anthropic)
-                future_gemini = executor.submit(query_gemini)
+            # Run each model multiple times
+            for model_name in ["OpenAI", "Claude", "Gemini"]:
+                # Create a progress status for this model
+                model_progress = progress_container.empty()
+                model_progress.info(f"{model_name}: Starting {runs_per_model} runs...")
                 
-                # Map of futures to their status placeholders and model names
-                futures_map = {
-                    future_openai: (openai_status, "OpenAI"),
-                    future_anthropic: (claude_status, "Claude"),
-                    future_gemini: (gemini_status, "Gemini")
-                }
-                
-                # Results container
-                results = {"OpenAI": None, "Claude": None, "Gemini": None}
-                
-                # Wait for all to complete while updating UI from main thread only
-                while futures_map:
-                    # Use wait with a small timeout to check completed futures
-                    done, _ = concurrent.futures.wait(
-                        futures_map.keys(),
-                        timeout=0.1,
-                        return_when=concurrent.futures.FIRST_COMPLETED
-                    )
+                # Run the model multiple times
+                for run_num in range(1, runs_per_model + 1):
+                    run_progress = progress_container.empty()
+                    run_progress.info(f"{model_name} - Run {run_num}/{runs_per_model}: Querying...")
                     
-                    # Process completed futures and update UI from main thread
-                    for future in done:
-                        if future not in futures_map:
-                            continue
+                    try:
+                        # Call the appropriate model
+                        if model_name == "OpenAI":
+                            result = call_openai(get_prompt(query))
+                        elif model_name == "Claude":
+                            result = call_anthropic(get_prompt(query))
+                        else:  # Gemini
+                            result = call_google(get_prompt(query))
+                        
+                        # Check if we got a valid result
+                        if result:
+                            run_progress.success(f"{model_name} - Run {run_num}/{runs_per_model}: Complete")
                             
-                        status_element, model_name = futures_map[future]
-                        result = future.result()
-                        
-                        # Store the result
-                        results[model_name] = result["result"]
-                        
-                        # Update UI - this is in the main thread with ScriptRunContext
-                        if "Error" in result["status"]:
-                            status_element.error(f"{model_name}: {result['status']}")
+                            # Process the result based on its format
+                            df = pd.DataFrame()
+                            
+                            if model_name == "OpenAI" and "companies" in result:
+                                df = pd.DataFrame(result["companies"])
+                            elif "companies" in result:
+                                df = pd.DataFrame(result["companies"])
+                            elif isinstance(result, list):
+                                df = pd.DataFrame(result)
+                            elif result:
+                                df = pd.DataFrame([result])
+                            
+                            # Add source metadata to the results
+                            if not df.empty:
+                                # Normalize column names
+                                column_map = {}
+                                for col in df.columns:
+                                    if col.lower() == "rank":
+                                        column_map[col] = "Rank"
+                                    elif col.lower() in ["company", "company name", "name"]:
+                                        column_map[col] = "Company Name"
+                                    elif col.lower() in ["url", "website", "link"]:
+                                        column_map[col] = "URL"
+                                    elif col.lower() in ["commentary", "differentiators", "commentary on differentiators"]:
+                                        column_map[col] = "Commentary on Differentiators"
+                                
+                                # Rename columns if needed
+                                if column_map:
+                                    df.rename(columns=column_map, inplace=True)
+                                
+                                # Add source information
+                                df["Source Model"] = model_name
+                                df["Run Number"] = run_num
+                                
+                                # Add to all results
+                                all_results_list.append(df)
                         else:
-                            status_element.success(f"{model_name}: {result['status']}")
-                        
-                        # Remove the processed future
-                        del futures_map[future]
+                            run_progress.error(f"{model_name} - Run {run_num}/{runs_per_model}: Failed")
+                    except Exception as e:
+                        run_progress.error(f"{model_name} - Run {run_num}/{runs_per_model}: Error - {str(e)[:50]}...")
+                
+                # Update overall model progress
+                model_progress.success(f"{model_name}: All runs completed")
             
-            # Now all futures have completed, extract results
-            openai_results = results["OpenAI"]
-            anthropic_results = results["Claude"]
-            google_results = results["Gemini"]
-            
-            # Check if we have at least one valid result before proceeding
-            if not any([openai_results, anthropic_results, google_results]):
-                st.error("All models failed to return valid results. Please try again.")
-                st.stop()
-            
-            # Create DataFrames for each model
-            dfs = {}
-            
-            # Process OpenAI results
-            if openai_results and "companies" in openai_results:
-                dfs["GPT-4"] = pd.DataFrame(openai_results["companies"])
-            elif openai_results:
-                dfs["GPT-4"] = pd.DataFrame(openai_results)
-            else:
-                dfs["GPT-4"] = pd.DataFrame([])
-            
-            # Process Anthropic results
-            if anthropic_results and "companies" in anthropic_results:
-                dfs["Claude"] = pd.DataFrame(anthropic_results["companies"])
-            elif isinstance(anthropic_results, list):
-                dfs["Claude"] = pd.DataFrame(anthropic_results)
-            elif anthropic_results:
-                dfs["Claude"] = pd.DataFrame([anthropic_results])
-            else:
-                dfs["Claude"] = pd.DataFrame([])
-            
-            # Process Google results
-            if google_results and "companies" in google_results:
-                dfs["Gemini"] = pd.DataFrame(google_results["companies"])
-            elif isinstance(google_results, list):
-                dfs["Gemini"] = pd.DataFrame(google_results)
-            elif google_results:
-                dfs["Gemini"] = pd.DataFrame([google_results])
-            else:
-                dfs["Gemini"] = pd.DataFrame([])
-            
-            # Normalize column names (handle case differences)
-            for model, df in dfs.items():
-                if not df.empty:
-                    # Normalize column names to handle case variations
-                    column_map = {}
-                    for col in df.columns:
-                        if col.lower() == "rank":
-                            column_map[col] = "Rank"
-                        elif col.lower() in ["company", "company name", "name"]:
-                            column_map[col] = "Company Name"
-                        elif col.lower() in ["url", "website", "link"]:
-                            column_map[col] = "URL"
-                        elif col.lower() in ["commentary", "differentiators", "commentary on differentiators"]:
-                            column_map[col] = "Commentary on Differentiators"
-                    
-                    # Rename columns if needed
-                    if column_map:
-                        df.rename(columns=column_map, inplace=True)
-                    
-                    # Add a column to identify which model this data came from
-                    df["Source Model"] = model
-            
-            # Combine all results into a single dataframe
-            all_results = pd.concat([df for df in dfs.values() if not df.empty], ignore_index=True)
-            
-            # If we have results, create a consolidated analysis
-            if not all_results.empty:
+            # Combine all results
+            if all_results_list:
+                all_results = pd.concat(all_results_list, ignore_index=True)
+                
+                # Add normalized URL for grouping
+                all_results["Normalized URL"] = all_results["URL"].apply(normalize_url)
+                
+                # Display run summary
+                st.markdown("### Run Summary")
+                summary_cols = st.columns(3)
+                
+                total_runs = len(all_results_list)
+                summary_cols[0].metric("Total Runs", f"{total_runs}")
+                summary_cols[1].metric("Unique Companies", f"{all_results['Normalized URL'].nunique()}")
+                summary_cols[2].metric("Data Points", f"{len(all_results)}")
+                
                 # Group by URL to get stats
                 url_stats = {}
-                total_models = len([df for df in dfs.values() if not df.empty])
-                
-                # Add a normalized URL column for grouping
-                all_results["Normalized URL"] = all_results["URL"].apply(normalize_url)
+                total_runs = runs_per_model * 3  # 3 models
                 
                 for norm_url in all_results["Normalized URL"].unique():
                     # Get all entries for this normalized URL
                     url_entries = all_results[all_results["Normalized URL"] == norm_url]
                     
-                    # Calculate metrics
-                    models_appeared_in = url_entries["Source Model"].nunique()
-                    appearance_pct = (models_appeared_in / total_models) * 100
+                    # Calculate metrics across all runs
+                    runs_appeared_in = len(url_entries)
+                    appearance_pct = (runs_appeared_in / total_runs) * 100
                     avg_rank = url_entries["Rank"].mean()
                     
                     # Calculate visibility score (10 points for #1, 9 points for #2, etc.)
@@ -481,22 +422,24 @@ if st.button("Research Companies"):
                         if 1 <= rank <= 10:
                             visibility_score += (11 - rank)
                     
-                    # Get company name (use most common one if different across models)
+                    # Get company name (use most common one if different across runs)
                     company_name = url_entries["Company Name"].mode()[0]
                     
                     # Get the most common actual URL for display
                     display_url = url_entries["URL"].mode()[0]
                     
-                    # Store the commentaries from each model
+                    # Store the commentaries from each model and run
                     commentaries = {}
                     for _, row in url_entries.iterrows():
-                        commentaries[row["Source Model"]] = row["Commentary on Differentiators"]
+                        model_run = f"{row['Source Model']} (Run {row['Run Number']})"
+                        commentaries[model_run] = row["Commentary on Differentiators"]
                     
                     # Store the stats
                     url_stats[norm_url] = {
                         "Company Name": company_name,
                         "URL": display_url,
                         "Normalized URL": norm_url,
+                        "Runs Appeared": runs_appeared_in,
                         "Appearance %": appearance_pct,
                         "Average Rank": avg_rank,
                         "Visibility Score": visibility_score,
@@ -506,7 +449,7 @@ if st.button("Research Companies"):
                 # Convert to dataframe and sort
                 stats_df = pd.DataFrame(url_stats.values())
                 stats_df = stats_df.sort_values(by=["Visibility Score", "Appearance %", "Average Rank"], 
-                                                 ascending=[False, False, True])
+                                               ascending=[False, False, True])
                 
                 # Display the consolidated results
                 st.markdown("### Consolidated Results")
@@ -530,36 +473,23 @@ if st.button("Research Companies"):
                     
                     # Column 5: Commentaries Expander
                     with cols[4].expander("View Differentiators"):
-                        for model, commentary in row["Commentaries"].items():
-                            st.markdown(f"**{model}:**")
+                        for model_run, commentary in row["Commentaries"].items():
+                            st.markdown(f"**{model_run}:**")
                             st.markdown(commentary)
                             st.markdown("---")
             else:
-                st.warning("No results to display.")
+                st.error("All model runs failed to return valid results. Please try again.")
+                st.stop()
             
-            # Display raw results for debugging
-            with st.expander("View Raw Results"):
-                st.markdown("### Raw Results")
-                
-                # Display URL normalization info
+            # Display raw data for debugging
+            with st.expander("View Raw Data"):
                 st.markdown("### URL Normalization")
                 if not all_results.empty:
                     url_mapping = all_results[["URL", "Normalized URL"]].drop_duplicates()
                     st.dataframe(url_mapping)
-                else:
-                    st.info("No URLs to display")
                 
-                # Display raw results for each model
-                st.markdown("### API Responses")
-                for model, results in [
-                    ("GPT-4", openai_results),
-                    ("Claude", anthropic_results),
-                    ("Gemini", google_results)
-                ]:
-                    st.markdown(f"**{model} Raw Response:**")
-                    if results:
-                        st.json(results)
-                    else:
-                        st.error(f"No results from {model}")
+                st.markdown("### Complete Dataset")
+                if not all_results.empty:
+                    st.dataframe(all_results)
     else:
         st.warning("Please enter a research query.")
