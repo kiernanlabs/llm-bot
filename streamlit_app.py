@@ -46,16 +46,6 @@ def get_prompt(query):
             "Commentary on Differentiators": "string"
         }}
     ]
-    
-    Example response format:
-    [
-        {{
-            "Rank": 1,
-            "Company Name": "Example Corp",
-            "URL": "https://example.com",
-            "Commentary on Differentiators": "Leading innovator in the field"
-        }}
-    ]
     """
 
 # Function to call OpenAI
