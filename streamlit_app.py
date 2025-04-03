@@ -307,96 +307,97 @@ def normalize_url(url):
 if st.button("Research Companies"):
     if query:
         with st.spinner("Researching companies using multiple AI models..."):
-            # Create a progress section
+            # Create a progress section and status placeholders
             st.markdown("### Progress")
-            progress_placeholder = st.empty()
-            progress_cols = progress_placeholder.columns(3)
+            progress_cols = st.columns(3)
             
-            # Initialize progress status with placeholders for updates
-            progress = {}
-            for i, model in enumerate(["OpenAI", "Claude", "Gemini"]):
-                progress[model] = {
-                    "col": progress_cols[i],
-                    "status": "Querying..."
-                }
-                progress[model]["col"].info(f"{model}: {progress[model]['status']}")
+            # Set up status placeholders
+            openai_status = progress_cols[0].empty()
+            claude_status = progress_cols[1].empty() 
+            gemini_status = progress_cols[2].empty()
             
-            # Define worker functions without UI updates
+            # Show initial status
+            openai_status.info("OpenAI: Querying...")
+            claude_status.info("Claude: Querying...")
+            gemini_status.info("Gemini: Querying...")
+            
+            # Define functions that only handle API calls and return results (no UI updates)
             def query_openai():
                 try:
-                    result = call_openai(get_prompt(query))
-                    return {"status": "Complete", "result": result}
+                    return {"status": "Complete", "result": call_openai(get_prompt(query))}
                 except Exception as e:
                     error_msg = str(e)
                     return {"status": f"Error: {error_msg[:50]}..." if len(error_msg) > 50 else f"Error: {error_msg}", "result": None}
             
             def query_anthropic():
                 try:
-                    result = call_anthropic(get_prompt(query))
-                    return {"status": "Complete", "result": result}
+                    return {"status": "Complete", "result": call_anthropic(get_prompt(query))}
                 except Exception as e:
                     error_msg = str(e)
                     return {"status": f"Error: {error_msg[:50]}..." if len(error_msg) > 50 else f"Error: {error_msg}", "result": None}
             
             def query_gemini():
                 try:
-                    result = call_google(get_prompt(query))
-                    return {"status": "Complete", "result": result}
+                    return {"status": "Complete", "result": call_google(get_prompt(query))}
                 except Exception as e:
                     error_msg = str(e)
                     return {"status": f"Error: {error_msg[:50]}..." if len(error_msg) > 50 else f"Error: {error_msg}", "result": None}
             
-            # Submit tasks to executor but don't wait for results yet
+            # Use ThreadPoolExecutor to run queries in parallel, but don't update UI from threads
             with concurrent.futures.ThreadPoolExecutor() as executor:
+                # Submit tasks
                 future_openai = executor.submit(query_openai)
                 future_anthropic = executor.submit(query_anthropic)
                 future_gemini = executor.submit(query_gemini)
                 
-                # Create a mapping of futures to model names
-                futures = {
-                    "OpenAI": future_openai,
-                    "Claude": future_anthropic,
-                    "Gemini": future_gemini
+                # Map of futures to their status placeholders and model names
+                futures_map = {
+                    future_openai: (openai_status, "OpenAI"),
+                    future_anthropic: (claude_status, "Claude"),
+                    future_gemini: (gemini_status, "Gemini")
                 }
                 
-                # Update UI periodically until all tasks complete
-                all_done = False
-                model_results = {"OpenAI": None, "Claude": None, "Gemini": None}
+                # Results container
+                results = {"OpenAI": None, "Claude": None, "Gemini": None}
                 
-                # Check and update statuses until all complete
-                while not all_done:
-                    # Update status for each model
-                    for model, future in futures.items():
-                        if future.done() and progress[model]["status"] == "Querying...":
-                            try:
-                                # Get the result
-                                result = future.result()
-                                model_results[model] = result["result"]
-                                
-                                # Update the status display
-                                if "Error" in result["status"]:
-                                    progress[model]["col"].error(f"{model}: {result['status']}")
-                                else:
-                                    progress[model]["col"].success(f"{model}: {result['status']}")
-                                
-                                # Update the progress tracking
-                                progress[model]["status"] = result["status"]
-                            except Exception as e:
-                                # Handle any unexpected exceptions
-                                progress[model]["col"].error(f"{model}: Error: {str(e)}")
-                                progress[model]["status"] = "Error"
+                # Wait for all to complete while updating UI from main thread only
+                while futures_map:
+                    # Use wait with a small timeout to check completed futures
+                    done, _ = concurrent.futures.wait(
+                        futures_map.keys(),
+                        timeout=0.1,
+                        return_when=concurrent.futures.FIRST_COMPLETED
+                    )
                     
-                    # Check if all are done
-                    all_done = all(future.done() for future in futures.values())
-                    
-                    # Small delay to prevent UI freezing and reduce CPU usage
-                    if not all_done:
-                        time.sleep(0.1)
+                    # Process completed futures and update UI from main thread
+                    for future in done:
+                        if future not in futures_map:
+                            continue
+                            
+                        status_element, model_name = futures_map[future]
+                        result = future.result()
+                        
+                        # Store the result
+                        results[model_name] = result["result"]
+                        
+                        # Update UI - this is in the main thread with ScriptRunContext
+                        if "Error" in result["status"]:
+                            status_element.error(f"{model_name}: {result['status']}")
+                        else:
+                            status_element.success(f"{model_name}: {result['status']}")
+                        
+                        # Remove the processed future
+                        del futures_map[future]
             
-            # Get the results
-            openai_results = model_results["OpenAI"]
-            anthropic_results = model_results["Claude"]
-            google_results = model_results["Gemini"]
+            # Now all futures have completed, extract results
+            openai_results = results["OpenAI"]
+            anthropic_results = results["Claude"]
+            google_results = results["Gemini"]
+            
+            # Check if we have at least one valid result before proceeding
+            if not any([openai_results, anthropic_results, google_results]):
+                st.error("All models failed to return valid results. Please try again.")
+                st.stop()
             
             # Create DataFrames for each model
             dfs = {}
