@@ -204,11 +204,15 @@ def call_anthropic(prompt):
                     if show_extracted:
                         st.write("### Full Extracted JSON:")
                         st.code(json_str)
-                        
+                    
                     return json.loads(json_str)
                 else:
                     st.error("Could not find valid JSON in Anthropic response")
                     return None
+            except Exception as e:
+                st.error(f"Anthropic API Error: {str(e)}")
+                st.write(f"Debug: Exception details: {str(e)}")
+                return None
         except Exception as e:
             st.error(f"Anthropic API Error: {str(e)}")
             st.write(f"Debug: Exception details: {str(e)}")
@@ -232,7 +236,7 @@ def call_google(prompt):
             if not response or not response.text:
                 st.error("Google returned empty response")
                 return None
-                
+            
             content = response.text.strip()
             
             # Show response preview
@@ -264,11 +268,15 @@ def call_google(prompt):
                     if show_extracted:
                         st.write("### Full Extracted JSON:")
                         st.code(json_str)
-                        
+                    
                     return json.loads(json_str)
                 else:
                     st.error("Could not find valid JSON in Google response")
                     return None
+            except Exception as e:
+                st.error(f"Google API Error: {str(e)}")
+                st.write(f"Debug: Exception details: {str(e)}")
+                return None
         except Exception as e:
             st.error(f"Google API Error: {str(e)}")
             st.write(f"Debug: Exception details: {str(e)}")
@@ -464,6 +472,14 @@ if st.button("Research Companies"):
                     appearance_pct = (models_appeared_in / total_models) * 100
                     avg_rank = url_entries["Rank"].mean()
                     
+                    # Calculate visibility score (10 points for #1, 9 points for #2, etc.)
+                    visibility_score = 0
+                    for _, row in url_entries.iterrows():
+                        rank = row["Rank"]
+                        # Award points based on rank (max 10 points for rank 1)
+                        if 1 <= rank <= 10:
+                            visibility_score += (11 - rank)
+                    
                     # Get company name (use most common one if different across models)
                     company_name = url_entries["Company Name"].mode()[0]
                     
@@ -482,19 +498,21 @@ if st.button("Research Companies"):
                         "Normalized URL": norm_url,
                         "Appearance %": appearance_pct,
                         "Average Rank": avg_rank,
+                        "Visibility Score": visibility_score,
                         "Commentaries": commentaries
                     }
                 
                 # Convert to dataframe and sort
                 stats_df = pd.DataFrame(url_stats.values())
-                stats_df = stats_df.sort_values(by=["Appearance %", "Average Rank"], ascending=[False, True])
+                stats_df = stats_df.sort_values(by=["Visibility Score", "Appearance %", "Average Rank"], 
+                                                 ascending=[False, False, True])
                 
                 # Display the consolidated results
                 st.markdown("### Consolidated Results")
                 
                 # Display the table
                 for _, row in stats_df.iterrows():
-                    cols = st.columns([3, 1, 1, 2])
+                    cols = st.columns([3, 1, 1, 1, 2])
                     
                     # Column 1: Company Name and URL
                     cols[0].markdown(f"**{row['Company Name']}**")
@@ -506,8 +524,11 @@ if st.button("Research Companies"):
                     # Column 3: Average Rank
                     cols[2].metric("Avg Rank", f"{row['Average Rank']:.1f}")
                     
-                    # Column 4: Commentaries Expander
-                    with cols[3].expander("View Differentiators"):
+                    # Column 4: Visibility Score
+                    cols[3].metric("Visibility", f"{row['Visibility Score']:.0f}")
+                    
+                    # Column 5: Commentaries Expander
+                    with cols[4].expander("View Differentiators"):
                         for model, commentary in row["Commentaries"].items():
                             st.markdown(f"**{model}:**")
                             st.markdown(commentary)
