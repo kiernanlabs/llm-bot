@@ -304,74 +304,91 @@ if st.button("Research Companies"):
             progress_placeholder = st.empty()
             progress_cols = progress_placeholder.columns(3)
             
-            # Initialize progress status
-            progress_status = {
-                "OpenAI": {"status": "Querying...", "result": None},
-                "Claude": {"status": "Querying...", "result": None},
-                "Gemini": {"status": "Querying...", "result": None}
-            }
-            
-            # Display initial progress
+            # Initialize progress status with placeholders for updates
+            progress = {}
             for i, model in enumerate(["OpenAI", "Claude", "Gemini"]):
-                progress_cols[i].info(f"{model}: {progress_status[model]['status']}")
+                progress[model] = {
+                    "col": progress_cols[i],
+                    "status": "Querying..."
+                }
+                progress[model]["col"].info(f"{model}: {progress[model]['status']}")
             
-            # Define worker functions for each model
+            # Define worker functions without UI updates
             def query_openai():
                 try:
                     result = call_openai(get_prompt(query))
-                    progress_status["OpenAI"]["status"] = "Complete"
-                    progress_status["OpenAI"]["result"] = result
-                    # Update progress display
-                    progress_cols[0].success(f"OpenAI: {progress_status['OpenAI']['status']}")
+                    return {"status": "Complete", "result": result}
                 except Exception as e:
                     error_msg = str(e)
-                    progress_status["OpenAI"]["status"] = f"Error: {error_msg[:50]}..." if len(error_msg) > 50 else f"Error: {error_msg}"
-                    progress_cols[0].error(f"OpenAI: {progress_status['OpenAI']['status']}")
+                    return {"status": f"Error: {error_msg[:50]}..." if len(error_msg) > 50 else f"Error: {error_msg}", "result": None}
             
             def query_anthropic():
                 try:
                     result = call_anthropic(get_prompt(query))
-                    progress_status["Claude"]["status"] = "Complete"
-                    progress_status["Claude"]["result"] = result
-                    # Update progress display
-                    progress_cols[1].success(f"Claude: {progress_status['Claude']['status']}")
+                    return {"status": "Complete", "result": result}
                 except Exception as e:
                     error_msg = str(e)
-                    progress_status["Claude"]["status"] = f"Error: {error_msg[:50]}..." if len(error_msg) > 50 else f"Error: {error_msg}"
-                    progress_cols[1].error(f"Claude: {progress_status['Claude']['status']}")
+                    return {"status": f"Error: {error_msg[:50]}..." if len(error_msg) > 50 else f"Error: {error_msg}", "result": None}
             
             def query_gemini():
                 try:
                     result = call_google(get_prompt(query))
-                    progress_status["Gemini"]["status"] = "Complete"
-                    progress_status["Gemini"]["result"] = result
-                    # Update progress display
-                    progress_cols[2].success(f"Gemini: {progress_status['Gemini']['status']}")
+                    return {"status": "Complete", "result": result}
                 except Exception as e:
                     error_msg = str(e)
-                    progress_status["Gemini"]["status"] = f"Error: {error_msg[:50]}..." if len(error_msg) > 50 else f"Error: {error_msg}"
-                    progress_cols[2].error(f"Gemini: {progress_status['Gemini']['status']}")
+                    return {"status": f"Error: {error_msg[:50]}..." if len(error_msg) > 50 else f"Error: {error_msg}", "result": None}
             
-            # Run all queries in parallel
+            # Submit tasks to executor but don't wait for results yet
             with concurrent.futures.ThreadPoolExecutor() as executor:
-                executor.submit(query_openai)
-                executor.submit(query_anthropic)
-                executor.submit(query_gemini)
+                future_openai = executor.submit(query_openai)
+                future_anthropic = executor.submit(query_anthropic)
+                future_gemini = executor.submit(query_gemini)
                 
-                # Wait for all tasks to complete (with a nicer UI experience)
-                completed = False
-                while not completed:
-                    # Check if all tasks are done
-                    statuses = [progress_status[model]["status"] for model in ["OpenAI", "Claude", "Gemini"]]
-                    completed = all(status != "Querying..." for status in statuses)
+                # Create a mapping of futures to model names
+                futures = {
+                    "OpenAI": future_openai,
+                    "Claude": future_anthropic,
+                    "Gemini": future_gemini
+                }
+                
+                # Update UI periodically until all tasks complete
+                all_done = False
+                model_results = {"OpenAI": None, "Claude": None, "Gemini": None}
+                
+                # Check and update statuses until all complete
+                while not all_done:
+                    # Update status for each model
+                    for model, future in futures.items():
+                        if future.done() and progress[model]["status"] == "Querying...":
+                            try:
+                                # Get the result
+                                result = future.result()
+                                model_results[model] = result["result"]
+                                
+                                # Update the status display
+                                if "Error" in result["status"]:
+                                    progress[model]["col"].error(f"{model}: {result['status']}")
+                                else:
+                                    progress[model]["col"].success(f"{model}: {result['status']}")
+                                
+                                # Update the progress tracking
+                                progress[model]["status"] = result["status"]
+                            except Exception as e:
+                                # Handle any unexpected exceptions
+                                progress[model]["col"].error(f"{model}: Error: {str(e)}")
+                                progress[model]["status"] = "Error"
                     
-                    if not completed:
-                        time.sleep(0.1)  # Small delay to prevent UI freezing
+                    # Check if all are done
+                    all_done = all(future.done() for future in futures.values())
+                    
+                    # Small delay to prevent UI freezing and reduce CPU usage
+                    if not all_done:
+                        time.sleep(0.1)
             
-            # Get results from progress_status
-            openai_results = progress_status["OpenAI"]["result"]
-            anthropic_results = progress_status["Claude"]["result"]
-            google_results = progress_status["Gemini"]["result"]
+            # Get the results
+            openai_results = model_results["OpenAI"]
+            anthropic_results = model_results["Claude"]
+            google_results = model_results["Gemini"]
             
             # Create DataFrames for each model
             dfs = {}
