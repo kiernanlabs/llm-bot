@@ -40,9 +40,6 @@ with st.expander("Model Settings", expanded=False):
         st.subheader("Google")
         google_model = st.text_input("Google Model", value="gemini-2.0-flash", key="google_model")
 
-# Display current models in info box
-st.info(f"Currently using: OpenAI: {openai_model} | Anthropic: {anthropic_model} | Google: {google_model}")
-
 # Query input
 query = st.text_input(
     "Enter your research query:",
@@ -315,41 +312,74 @@ if st.button("Research Companies"):
                     # Rename columns if needed
                     if column_map:
                         df.rename(columns=column_map, inplace=True)
+                    
+                    # Add a column to identify which model this data came from
+                    df["Source Model"] = model
             
-            # Display results in a table
-            st.markdown("### Results")
+            # Combine all results into a single dataframe
+            all_results = pd.concat([df for df in dfs.values() if not df.empty], ignore_index=True)
             
-            # Create a container for the table
-            table_container = st.container()
-            
-            # Create the table header
-            cols = st.columns(len(dfs))
-            for col, (model, _) in zip(cols, dfs.items()):
-                col.markdown(f"**{model}**")
-            
-            # Display the results
-            max_rows = max((len(df) for df in dfs.values() if not df.empty), default=0)
-            for row in range(max_rows):
-                cols = st.columns(len(dfs))
-                for col, (model, df) in zip(cols, dfs.items()):
-                    if not df.empty and row < len(df):
-                        company_data = df.iloc[row]
-                        
-                        # Extract data with fallbacks
-                        rank = company_data.get("Rank", row + 1) if hasattr(company_data, "get") else row + 1
-                        company_name = company_data.get("Company Name", "Unknown") if hasattr(company_data, "get") else "Unknown"
-                        url = company_data.get("URL", "#") if hasattr(company_data, "get") else "#"
-                        commentary = company_data.get("Commentary on Differentiators", "") if hasattr(company_data, "get") else ""
-                        
-                        col.markdown(
-                            f"**{rank}. {company_name}**\n\n"
-                            f"[{url}]({url})"
-                        )
-                        with col.expander("View Details"):
-                            st.markdown(f"**Commentary on Differentiators:**")
+            # If we have results, create a consolidated analysis
+            if not all_results.empty:
+                # Group by URL to get stats
+                url_stats = {}
+                total_models = len([df for df in dfs.values() if not df.empty])
+                
+                for url in all_results["URL"].unique():
+                    # Get all entries for this URL
+                    url_entries = all_results[all_results["URL"] == url]
+                    
+                    # Calculate metrics
+                    models_appeared_in = url_entries["Source Model"].nunique()
+                    appearance_pct = (models_appeared_in / total_models) * 100
+                    avg_rank = url_entries["Rank"].mean()
+                    
+                    # Get company name (use most common one if different across models)
+                    company_name = url_entries["Company Name"].mode()[0]
+                    
+                    # Store the commentaries from each model
+                    commentaries = {}
+                    for _, row in url_entries.iterrows():
+                        commentaries[row["Source Model"]] = row["Commentary on Differentiators"]
+                    
+                    # Store the stats
+                    url_stats[url] = {
+                        "Company Name": company_name,
+                        "URL": url,
+                        "Appearance %": appearance_pct,
+                        "Average Rank": avg_rank,
+                        "Commentaries": commentaries
+                    }
+                
+                # Convert to dataframe and sort
+                stats_df = pd.DataFrame(url_stats.values())
+                stats_df = stats_df.sort_values(by=["Appearance %", "Average Rank"], ascending=[False, True])
+                
+                # Display the consolidated results
+                st.markdown("### Consolidated Results")
+                
+                # Display the table
+                for _, row in stats_df.iterrows():
+                    cols = st.columns([3, 1, 1, 2])
+                    
+                    # Column 1: Company Name and URL
+                    cols[0].markdown(f"**{row['Company Name']}**")
+                    cols[0].markdown(f"[{row['URL']}]({row['URL']})")
+                    
+                    # Column 2: Appearance %
+                    cols[1].metric("Appearance", f"{row['Appearance %']:.0f}%")
+                    
+                    # Column 3: Average Rank
+                    cols[2].metric("Avg Rank", f"{row['Average Rank']:.1f}")
+                    
+                    # Column 4: Commentaries Expander
+                    with cols[3].expander("View Differentiators"):
+                        for model, commentary in row["Commentaries"].items():
+                            st.markdown(f"**{model}:**")
                             st.markdown(commentary)
-                    else:
-                        col.markdown("")
+                            st.markdown("---")
+            else:
+                st.warning("No results to display.")
             
             # Display raw results for debugging
             with st.expander("View Raw Results"):
