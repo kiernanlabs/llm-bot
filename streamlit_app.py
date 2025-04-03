@@ -55,6 +55,16 @@ def add_debug_log(model, run_id, message, level="INFO", data=None):
 
 # Model selection
 with st.expander("Model Settings", expanded=False):
+    # Add a setting for number of runs per model
+    runs_per_model = st.number_input("Number of Runs per Model", min_value=1, max_value=10, value=5, step=1, help="How many times to run each model")
+    
+    # Store in session state for persistence
+    if 'runs_per_model' not in st.session_state:
+        st.session_state.runs_per_model = runs_per_model
+    else:
+        st.session_state.runs_per_model = runs_per_model
+    
+    st.markdown("---")
     col1, col2, col3 = st.columns(3)
     
     with col1:
@@ -178,6 +188,17 @@ def call_anthropic(prompt, run_id=None):
         # Add JSON formatting instructions for Anthropic
         formatted_prompt = add_json_instructions(prompt)
         
+        # Make the JSON instructions even more explicit for Claude
+        formatted_prompt += """
+        
+        IMPORTANT FORMATTING RULES:
+        1. Do not use single quotes (') for JSON strings, always use double quotes (")
+        2. Make sure all strings are properly terminated with a closing quote
+        3. Escape any double quotes within strings with a backslash (\")
+        4. Do not include any text, markdown formatting, or code block markers
+        5. The response must be a single, valid JSON object
+        """
+        
         response = anthropic_client.messages.create(
             model=anthropic_model,
             max_tokens=1000,
@@ -193,23 +214,106 @@ def call_anthropic(prompt, run_id=None):
         add_debug_log(model_name, run_id, "Response preview", data=content[:500] + ('...' if len(content) > 500 else ''))
         add_debug_log(model_name, run_id, "Full response", level="DEBUG", data=content)
         
+        # Clean up the content to help with JSON parsing
+        def clean_json_string(json_str):
+            # Remove any potential markdown code block syntax
+            json_str = re.sub(r'^```json', '', json_str)
+            json_str = re.sub(r'^```', '', json_str)
+            json_str = re.sub(r'```$', '', json_str)
+            
+            # Remove any text before the first curly brace or after the last curly brace
+            first_brace = json_str.find('{')
+            last_brace = json_str.rfind('}')
+            
+            if first_brace != -1 and last_brace != -1:
+                json_str = json_str[first_brace:last_brace+1]
+            
+            return json_str.strip()
+        
+        # Clean the content
+        cleaned_content = clean_json_string(content)
+        add_debug_log(model_name, run_id, "Cleaned JSON", level="DEBUG", data=cleaned_content)
+        
         # Try to find JSON content within the response
         try:
             # First try direct JSON parsing
-            parsed_content = json.loads(content)
+            parsed_content = json.loads(cleaned_content)
             add_debug_log(model_name, run_id, "Successfully parsed JSON response")
             return parsed_content
         except json.JSONDecodeError as e:
             add_debug_log(model_name, run_id, f"JSON parsing failed: {str(e)}", level="WARNING")
+            
+            # Log more detailed error information
+            error_context = cleaned_content
+            if hasattr(e, 'pos'):
+                start = max(0, e.pos - 50)
+                end = min(len(cleaned_content), e.pos + 50)
+                error_context = f"...{cleaned_content[start:e.pos]}>>>ERROR HERE>>>{cleaned_content[e.pos:end]}..."
+            
+            add_debug_log(model_name, run_id, f"JSON error context", level="ERROR", data=error_context)
+            
+            # Try more aggressive JSON fixing approaches
+            try:
+                # Try with a JSON repair library if available
+                try:
+                    import json5
+                    add_debug_log(model_name, run_id, "Attempting to parse with json5", level="DEBUG")
+                    parsed_content = json5.loads(cleaned_content)
+                    add_debug_log(model_name, run_id, "Successfully parsed with json5", level="INFO")
+                    return parsed_content
+                except ImportError:
+                    add_debug_log(model_name, run_id, "json5 library not available", level="DEBUG")
+                
+                # Manual JSON fixing for common issues
+                fixed_content = cleaned_content
+                
+                # Fix unterminated strings by looking for quotes without matching pairs
+                quote_positions = [i for i, char in enumerate(fixed_content) if char == '"' and (i == 0 or fixed_content[i-1] != '\\')]
+                if len(quote_positions) % 2 == 1:  # Odd number of quotes means unterminated string
+                    last_quote = quote_positions[-1]
+                    fixed_content = fixed_content[:last_quote+1] + '"' + fixed_content[last_quote+1:]
+                    add_debug_log(model_name, run_id, "Fixed unterminated string", level="DEBUG", data=fixed_content)
+                
+                # Try parsing the fixed content
+                parsed_content = json.loads(fixed_content)
+                add_debug_log(model_name, run_id, "Successfully parsed after fixing", level="INFO")
+                return parsed_content
+            except Exception as fix_error:
+                add_debug_log(model_name, run_id, f"JSON fixing failed: {str(fix_error)}", level="ERROR")
+            
             # If that fails, try to extract JSON from the text
             import re
-            json_match = re.search(r'\{.*\}', content, re.DOTALL)
+            json_match = re.search(r'\{.*\}', cleaned_content, re.DOTALL)
             if json_match:
                 json_str = json_match.group()
                 add_debug_log(model_name, run_id, "Found JSON in text using regex")
                 add_debug_log(model_name, run_id, "Extracted JSON", level="DEBUG", data=json_str)
                 
-                return json.loads(json_str)
+                try:
+                    return json.loads(json_str)
+                except json.JSONDecodeError:
+                    # Last resort: try to create a minimal valid JSON with the company data
+                    add_debug_log(model_name, run_id, "Attempting to extract company data pattern", level="DEBUG")
+                    companies = []
+                    # Look for patterns like "Rank": 1, "Company Name": "Example"
+                    company_pattern = r'"Rank"\s*:\s*(\d+).*?"Company Name"\s*:\s*"([^"]+)".*?"URL"\s*:\s*"([^"]+)".*?"Commentary[^"]*"\s*:\s*"([^"]+)"'
+                    matches = re.finditer(company_pattern, cleaned_content, re.DOTALL)
+                    
+                    for match in matches:
+                        companies.append({
+                            "Rank": int(match.group(1)),
+                            "Company Name": match.group(2),
+                            "URL": match.group(3),
+                            "Commentary on Differentiators": match.group(4)
+                        })
+                    
+                    if companies:
+                        result = {"companies": companies}
+                        add_debug_log(model_name, run_id, f"Created minimal JSON with {len(companies)} companies", level="INFO")
+                        return result
+                    
+                    add_debug_log(model_name, run_id, "Could not extract company data", level="ERROR")
+                    return None
             else:
                 add_debug_log(model_name, run_id, "Could not find valid JSON in response", level="ERROR")
                 return None
@@ -297,14 +401,14 @@ if st.button("Research Companies"):
             results_container = st.container()
             
             # Set number of runs per model
-            runs_per_model = 5
+            runs_per_model = st.session_state.runs_per_model
             total_runs = runs_per_model * 3  # 3 models (OpenAI, Claude, Gemini)
             
             # Initialize results containers
             all_results_list = []
             
-            # Create tabs for progress, results, and debug logs
-            tab1, tab2, tab3 = st.tabs(["Progress", "Results", "Debug Logs"])
+            # Create tabs for combined view and debug logs
+            tab1, tab2 = st.tabs(["Research Results", "Debug Logs"])
             
             with tab1:
                 # Create progress bars in the progress tab
@@ -394,77 +498,21 @@ if st.button("Research Companies"):
                 
                 # Clear the primary progress indicators when done
                 status_text.text(f"✅ Processing complete! {completed_runs}/{total_runs} runs finished")
-            
-            # Update the debug logs tab with all collected logs
-            with tab3:
-                st.markdown("### Debug Logs")
                 
-                # Add log filtering options
-                log_filter_cols = st.columns(3)
-                with log_filter_cols[0]:
-                    selected_models = st.multiselect(
-                        "Filter by Model",
-                        options=["OpenAI", "Claude", "Gemini", "All"],
-                        default=["All"]
-                    )
+                # Add a separator between progress and results
+                st.markdown("---")
                 
-                with log_filter_cols[1]:
-                    selected_levels = st.multiselect(
-                        "Filter by Level",
-                        options=["INFO", "WARNING", "ERROR", "DEBUG", "All"],
-                        default=["All"]
-                    )
-                
-                with log_filter_cols[2]:
-                    clear_logs = st.button("Clear Logs")
-                    if clear_logs:
-                        st.session_state.debug_logs = []
-                        st.experimental_rerun()
-                
-                # Apply filters
-                filtered_logs = st.session_state.debug_logs
-                if "All" not in selected_models:
-                    filtered_logs = [log for log in filtered_logs if log["model"] in selected_models]
-                
-                if "All" not in selected_levels:
-                    filtered_logs = [log for log in filtered_logs if log["level"] in selected_levels]
-                
-                # Display logs in a table
-                if filtered_logs:
-                    log_table = []
-                    for log in filtered_logs:
-                        row = {
-                            "Time": log["timestamp"],
-                            "Model": log["model"],
-                            "Run": log["run_id"],
-                            "Level": log["level"],
-                            "Message": log["message"]
-                        }
-                        log_table.append(row)
+                # After all processing, continue with results in the same tab
+                if all_results_list:
+                    # Combine all results
+                    all_results = pd.concat(all_results_list, ignore_index=True)
                     
-                    st.dataframe(log_table)
+                    # Add normalized URL for grouping
+                    all_results["Normalized URL"] = all_results["URL"].apply(normalize_url)
                     
-                    # Always show log content
-                    st.markdown("### Log Content")
-                    for i, log in enumerate(filtered_logs):
-                        if log.get("data"):
-                            with st.expander(f"{log['timestamp']} - {log['model']} - {log['message']}"):
-                                st.code(log["data"])
-                else:
-                    st.info("No logs matching the selected filters.")
-            
-            # After all processing, show results in the results tab
-            if all_results_list:
-                # Combine all results
-                all_results = pd.concat(all_results_list, ignore_index=True)
-                
-                # Add normalized URL for grouping
-                all_results["Normalized URL"] = all_results["URL"].apply(normalize_url)
-                
-                # Store in session state for persistence
-                st.session_state.all_results = all_results
-                
-                with tab2:
+                    # Store in session state for persistence
+                    st.session_state.all_results = all_results
+                    
                     # Display run summary
                     st.markdown("### Run Summary")
                     summary_cols = st.columns(3)
@@ -482,7 +530,8 @@ if st.button("Research Companies"):
                         data=csv,
                         file_name=f"company_research_{query[:20].replace(' ', '_').lower() if query else 'results'}.csv",
                         mime="text/csv",
-                        help="Download the complete raw dataset for all runs and models"
+                        help="Download the complete raw dataset for all runs and models",
+                        key="download_button_initial"
                     )
                     
                     # Add model filtering
@@ -592,19 +641,81 @@ if st.button("Research Companies"):
                             st.dataframe(filtered_results)
                     else:
                         st.warning("No results match the selected filters. Please select different models.")
-            else:
-                with tab2:
+                else:
                     st.error("All model runs failed to return valid results. Please try again.")
                     st.stop()
+            
+            # Update the debug logs tab
+            with tab2:
+                st.markdown("### Debug Logs")
+                
+                # Add log filtering options
+                log_filter_cols = st.columns(3)
+                with log_filter_cols[0]:
+                    selected_models = st.multiselect(
+                        "Filter by Model",
+                        options=["OpenAI", "Claude", "Gemini", "All"],
+                        default=["All"],
+                        key="debug_model_filter"
+                    )
+                
+                with log_filter_cols[1]:
+                    selected_levels = st.multiselect(
+                        "Filter by Level",
+                        options=["INFO", "WARNING", "ERROR", "DEBUG", "All"],
+                        default=["All"],
+                        key="debug_level_filter"
+                    )
+                
+                with log_filter_cols[2]:
+                    clear_logs = st.button("Clear Logs")
+                    if clear_logs:
+                        st.session_state.debug_logs = []
+                        st.experimental_rerun()
+                
+                # Apply filters
+                filtered_logs = st.session_state.debug_logs
+                if "All" not in selected_models:
+                    filtered_logs = [log for log in filtered_logs if log["model"] in selected_models]
+                
+                if "All" not in selected_levels:
+                    filtered_logs = [log for log in filtered_logs if log["level"] in selected_levels]
+                
+                # Display logs in a table
+                if filtered_logs:
+                    log_table = []
+                    for log in filtered_logs:
+                        row = {
+                            "Time": log["timestamp"],
+                            "Model": log["model"],
+                            "Run": log["run_id"],
+                            "Level": log["level"],
+                            "Message": log["message"]
+                        }
+                        log_table.append(row)
+                    
+                    st.dataframe(log_table)
+                    
+                    # Always show log content
+                    st.markdown("### Log Content")
+                    for i, log in enumerate(filtered_logs):
+                        if log.get("data"):
+                            with st.expander(f"{log['timestamp']} - {log['model']} - {log['message']}"):
+                                st.code(log["data"])
+                else:
+                    st.info("No logs matching the selected filters.")
     else:
         st.warning("Please enter a research query.")
         
 # Display results if they exist in session state (for when filters change)
 if st.session_state.has_run_query and st.session_state.all_results is not None:
     # Create tabs layout again (needed since we're outside the button click)
-    tab1, tab2, tab3 = st.tabs(["Progress", "Results", "Debug Logs"])
+    tab1, tab2 = st.tabs(["Research Results", "Debug Logs"])
     
-    with tab2:
+    with tab1:
+        # Add processing complete message
+        st.success(f"Processing complete! Using {st.session_state.runs_per_model} runs per model.")
+        
         # Access the stored results
         all_results = st.session_state.all_results
         
@@ -612,7 +723,7 @@ if st.session_state.has_run_query and st.session_state.all_results is not None:
         st.markdown("### Run Summary")
         summary_cols = st.columns(3)
         
-        runs_per_model = 5
+        runs_per_model = st.session_state.runs_per_model
         total_runs = runs_per_model * len(all_results["Source Model"].unique())
         total_companies = all_results["Normalized URL"].nunique()
         completed_runs = len(all_results) // 10  # Estimate based on typical results
@@ -629,7 +740,8 @@ if st.session_state.has_run_query and st.session_state.all_results is not None:
             data=csv,
             file_name=f"company_research_{query[:20].replace(' ', '_').lower() if query else 'results'}.csv",
             mime="text/csv",
-            help="Download the complete raw dataset for all runs and models"
+            help="Download the complete raw dataset for all runs and models",
+            key="download_button_filtered"
         )
         
         # Add model filtering
@@ -741,7 +853,7 @@ if st.session_state.has_run_query and st.session_state.all_results is not None:
             st.warning("No results match the selected filters. Please select different models.")
     
     # Show debug logs tab content
-    with tab3:
+    with tab2:
         st.markdown("### Debug Logs")
         
         # Add log filtering options
