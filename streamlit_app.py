@@ -391,7 +391,7 @@ if st.button("Research Companies"):
                 st.markdown("### Debug Logs")
                 
                 # Add log filtering options
-                log_filter_cols = st.columns(4)
+                log_filter_cols = st.columns(3)
                 with log_filter_cols[0]:
                     selected_models = st.multiselect(
                         "Filter by Model",
@@ -407,9 +407,6 @@ if st.button("Research Companies"):
                     )
                 
                 with log_filter_cols[2]:
-                    show_content = st.checkbox("Show Full Content", value=False)
-                
-                with log_filter_cols[3]:
                     clear_logs = st.button("Clear Logs")
                     if clear_logs:
                         st.session_state.debug_logs = []
@@ -438,13 +435,12 @@ if st.button("Research Companies"):
                     
                     st.dataframe(log_table)
                     
-                    # Show log content in expandable sections if requested
-                    if show_content:
-                        st.markdown("### Log Content")
-                        for i, log in enumerate(filtered_logs):
-                            if log.get("data"):
-                                with st.expander(f"{log['timestamp']} - {log['model']} - {log['message']}"):
-                                    st.code(log["data"])
+                    # Always show log content
+                    st.markdown("### Log Content")
+                    for i, log in enumerate(filtered_logs):
+                        if log.get("data"):
+                            with st.expander(f"{log['timestamp']} - {log['model']} - {log['message']}"):
+                                st.code(log["data"])
                 else:
                     st.info("No logs matching the selected filters.")
             
@@ -466,16 +462,44 @@ if st.button("Research Companies"):
                     summary_cols[1].metric("Unique Companies", f"{total_companies}")
                     summary_cols[2].metric("Data Points", f"{len(all_results)}")
                     
+                    # Add download button at the top of the results tab
+                    st.markdown("### Download Data")
+                    csv = all_results.to_csv(index=False)
+                    st.download_button(
+                        label="💾 Download Full Dataset as CSV",
+                        data=csv,
+                        file_name=f"company_research_{query[:20].replace(' ', '_').lower()}.csv",
+                        mime="text/csv",
+                        help="Download the complete raw dataset for all runs and models"
+                    )
+                    
+                    # Add model filtering
+                    st.markdown("### Filter Results")
+                    selected_models = st.multiselect(
+                        "Filter by Model",
+                        options=["OpenAI", "Claude", "Gemini", "All"],
+                        default=["All"],
+                        key="results_model_filter"
+                    )
+                    
+                    # Filter results based on selected models
+                    filtered_results = all_results
+                    if "All" not in selected_models:
+                        filtered_results = all_results[all_results["Source Model"].isin(selected_models)]
+                    
+                    # Calculate the number of filtered runs
+                    filtered_runs = len(filtered_results["Source Model"].unique()) * runs_per_model
+                    
                     # Group by URL to get stats
                     url_stats = {}
                     
-                    for norm_url in all_results["Normalized URL"].unique():
+                    for norm_url in filtered_results["Normalized URL"].unique():
                         # Get all entries for this normalized URL
-                        url_entries = all_results[all_results["Normalized URL"] == norm_url]
+                        url_entries = filtered_results[filtered_results["Normalized URL"] == norm_url]
                         
                         # Calculate metrics across all runs
                         runs_appeared_in = len(url_entries)
-                        appearance_pct = (runs_appeared_in / total_runs) * 100
+                        appearance_pct = (runs_appeared_in / filtered_runs) * 100
                         avg_rank = url_entries["Rank"].mean()
                         
                         # Calculate visibility score (10 points for #1, 9 points for #2, etc.)
@@ -516,7 +540,8 @@ if st.button("Research Companies"):
                                                    ascending=[False, False, True])
                     
                     # Display the consolidated results
-                    st.markdown("### Consolidated Results")
+                    filter_text = ", ".join(selected_models) if "All" not in selected_models else "All Models"
+                    st.markdown(f"### Consolidated Results ({filter_text})")
                     
                     # Display the table
                     for _, row in stats_df.iterrows():
@@ -542,25 +567,14 @@ if st.button("Research Companies"):
                                 st.markdown(commentary)
                                 st.markdown("---")
                     
-                    # Add download button for the complete dataset
-                    st.markdown("### Download Data")
-                    csv = all_results.to_csv(index=False)
-                    st.download_button(
-                        label="💾 Download Full Dataset as CSV",
-                        data=csv,
-                        file_name=f"company_research_{query[:20].replace(' ', '_').lower()}.csv",
-                        mime="text/csv",
-                        help="Download the complete raw dataset for all runs and models"
-                    )
-                    
                     # Display raw data for debugging
                     with st.expander("View Raw Data"):
                         st.markdown("### URL Normalization")
-                        url_mapping = all_results[["URL", "Normalized URL"]].drop_duplicates()
+                        url_mapping = filtered_results[["URL", "Normalized URL"]].drop_duplicates()
                         st.dataframe(url_mapping)
                         
                         st.markdown("### Complete Dataset")
-                        st.dataframe(all_results)
+                        st.dataframe(filtered_results)
             else:
                 with tab2:
                     st.error("All model runs failed to return valid results. Please try again.")
