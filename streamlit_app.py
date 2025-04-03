@@ -185,6 +185,9 @@ def call_anthropic(prompt, run_id=None):
     add_debug_log(model_name, run_id, f"Starting request to {model_name} with model: {anthropic_model}")
     
     try:
+        # Import re module in this scope to ensure it's available
+        import re
+        
         # Add JSON formatting instructions for Anthropic
         formatted_prompt = add_json_instructions(prompt)
         
@@ -201,7 +204,7 @@ def call_anthropic(prompt, run_id=None):
         
         response = anthropic_client.messages.create(
             model=anthropic_model,
-            max_tokens=1000,
+            max_tokens=4000,  # Increase max tokens to avoid truncation
             messages=[{"role": "user", "content": formatted_prompt}]
         )
         
@@ -230,8 +233,74 @@ def call_anthropic(prompt, run_id=None):
             
             return json_str.strip()
         
+        # Check for truncated JSON response
+        def fix_truncated_json(json_str):
+            # Look for incomplete JSON structure (missing closing braces)
+            open_braces = json_str.count('{')
+            close_braces = json_str.count('}')
+            
+            # If we have unclosed braces, attempt to fix
+            if open_braces > close_braces:
+                add_debug_log(model_name, run_id, f"Detected truncated JSON: {open_braces} opening braces vs {close_braces} closing braces", level="WARNING")
+                
+                # Check for incomplete company entry
+                if json_str.endswith('"Commentary on Differentiators": "'):
+                    json_str += '"}]}'
+                elif '"Commentary on Differentiators": "' in json_str and not json_str.endswith('}'):
+                    # Find the last quote that might be missing a closing
+                    last_quote_pos = json_str.rfind('"')
+                    if last_quote_pos > 0 and json_str[last_quote_pos-1] != '\\':
+                        json_str = json_str[:last_quote_pos+1] + '"}]}'
+                else:
+                    # Add the necessary closing braces
+                    for _ in range(open_braces - close_braces):
+                        if json_str.rstrip().endswith('"') or json_str.rstrip().endswith(','):
+                            # If ending with quote or comma, assume we need to close an object
+                            json_str += '"}]}'
+                            break
+                        else:
+                            json_str += '}'
+            
+            return json_str
+        
+        # Function to ask the model to fix its own JSON
+        def ask_model_to_fix_json(original_content, error_message):
+            add_debug_log(model_name, run_id, "Asking model to fix its own JSON", level="INFO")
+            
+            fix_prompt = f"""
+            You previously provided a JSON response that could not be parsed due to the following error:
+            {error_message}
+            
+            Here is your original response:
+            {original_content}
+            
+            Please fix the JSON formatting issues and provide a valid, parsable JSON object. 
+            Only respond with the corrected JSON. No explanation, no markdown, no code blocks.
+            Make sure the response is complete and all brackets are closed properly.
+            """
+            
+            try:
+                # Send request to fix the JSON
+                fix_response = anthropic_client.messages.create(
+                    model=anthropic_model,
+                    max_tokens=4000,
+                    messages=[{"role": "user", "content": fix_prompt}]
+                )
+                
+                fixed_content = fix_response.content[0].text.strip()
+                add_debug_log(model_name, run_id, "Model provided fixed JSON", level="INFO")
+                add_debug_log(model_name, run_id, "Fixed JSON response", level="DEBUG", data=fixed_content)
+                
+                # Clean the fixed content
+                return clean_json_string(fixed_content)
+            except Exception as fix_error:
+                add_debug_log(model_name, run_id, f"Error asking model to fix JSON: {str(fix_error)}", level="ERROR")
+                return None
+        
         # Clean the content
         cleaned_content = clean_json_string(content)
+        # Fix truncated JSON if needed
+        cleaned_content = fix_truncated_json(cleaned_content)
         add_debug_log(model_name, run_id, "Cleaned JSON", level="DEBUG", data=cleaned_content)
         
         # Try to find JSON content within the response
@@ -251,6 +320,17 @@ def call_anthropic(prompt, run_id=None):
                 error_context = f"...{cleaned_content[start:e.pos]}>>>ERROR HERE>>>{cleaned_content[e.pos:end]}..."
             
             add_debug_log(model_name, run_id, f"JSON error context", level="ERROR", data=error_context)
+            
+            # Ask the model to fix its own JSON
+            fixed_json = ask_model_to_fix_json(content, str(e))
+            if fixed_json:
+                try:
+                    # Try parsing the AI-fixed JSON
+                    parsed_content = json.loads(fixed_json)
+                    add_debug_log(model_name, run_id, "Successfully parsed AI-fixed JSON", level="INFO")
+                    return parsed_content
+                except json.JSONDecodeError as fix_e:
+                    add_debug_log(model_name, run_id, f"AI-fixed JSON still has parsing issues: {str(fix_e)}", level="WARNING")
             
             # Try more aggressive JSON fixing approaches
             try:
@@ -282,7 +362,6 @@ def call_anthropic(prompt, run_id=None):
                 add_debug_log(model_name, run_id, f"JSON fixing failed: {str(fix_error)}", level="ERROR")
             
             # If that fails, try to extract JSON from the text
-            import re
             json_match = re.search(r'\{.*\}', cleaned_content, re.DOTALL)
             if json_match:
                 json_str = json_match.group()
@@ -297,7 +376,7 @@ def call_anthropic(prompt, run_id=None):
                     companies = []
                     # Look for patterns like "Rank": 1, "Company Name": "Example"
                     company_pattern = r'"Rank"\s*:\s*(\d+).*?"Company Name"\s*:\s*"([^"]+)".*?"URL"\s*:\s*"([^"]+)".*?"Commentary[^"]*"\s*:\s*"([^"]+)"'
-                    matches = re.finditer(company_pattern, cleaned_content, re.DOTALL)
+                    matches = re.finditer(company_pattern, content, re.DOTALL)
                     
                     for match in matches:
                         companies.append({
@@ -540,7 +619,7 @@ if st.button("Research Companies"):
                         "Filter by Model",
                         options=["OpenAI", "Claude", "Gemini", "All"],
                         default=["All"],
-                        key="results_model_filter"
+                        key="results_model_filter_initial"
                     )
                     
                     # Filter results based on selected models
@@ -750,7 +829,7 @@ if st.session_state.has_run_query and st.session_state.all_results is not None:
             "Filter by Model",
             options=["OpenAI", "Claude", "Gemini", "All"],
             default=["All"],
-            key="results_model_filter"
+            key="results_model_filter_persistent"
         )
         
         # Filter results based on selected models
