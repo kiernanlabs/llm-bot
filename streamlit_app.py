@@ -32,7 +32,7 @@ query = st.text_input(
 
 # Function to format the prompt
 def get_prompt(query):
-    return f"""Based on the following query, provide a list of companies in JSON format.
+    return f"""Based on the following query, provide a list of 10 companies in JSON format.
     Each company should have: Rank (1-10), Company Name, URL, and Commentary on Differentiators.
     Query: {query}
     
