@@ -36,13 +36,24 @@ def get_prompt(query):
     Each company should have: Rank (1-10), Company Name, URL, and Commentary on Differentiators.
     Query: {query}
     
-    Format the response as a JSON array of objects with these exact fields:
+    IMPORTANT: Respond ONLY with a JSON array. Do not include any other text, markdown, or formatting.
+    The response must be a valid JSON array of objects with these exact fields:
     [
         {{
             "Rank": number,
             "Company Name": "string",
             "URL": "string",
             "Commentary on Differentiators": "string"
+        }}
+    ]
+    
+    Example response format:
+    [
+        {{
+            "Rank": 1,
+            "Company Name": "Example Corp",
+            "URL": "https://example.com",
+            "Commentary on Differentiators": "Leading innovator in the field"
         }}
     ]
     """
@@ -68,7 +79,21 @@ def call_anthropic(prompt):
             max_tokens=1000,
             messages=[{"role": "user", "content": prompt}]
         )
-        return json.loads(response.content[0].text)
+        # Extract the text content and ensure it's properly formatted
+        content = response.content[0].text.strip()
+        # Try to find JSON content within the response
+        try:
+            # First try direct JSON parsing
+            return json.loads(content)
+        except json.JSONDecodeError:
+            # If that fails, try to extract JSON from the text
+            import re
+            json_match = re.search(r'\[.*\]', content, re.DOTALL)
+            if json_match:
+                return json.loads(json_match.group())
+            else:
+                st.error("Could not find valid JSON in Anthropic response")
+                return None
     except Exception as e:
         st.error(f"Anthropic API Error: {str(e)}")
         return None
@@ -76,7 +101,7 @@ def call_anthropic(prompt):
 # Function to call Google
 def call_google(prompt):
     try:
-        model = genai.GenerativeModel('gemini-pro')
+        model = genai.GenerativeModel('gemini-2.0-flash')
         response = model.generate_content(prompt)
         return json.loads(response.text)
     except Exception as e:
@@ -94,9 +119,9 @@ if st.button("Research Companies"):
             
             # Create DataFrames for each model
             dfs = {
-                "GPT-4": pd.DataFrame(openai_results) if openai_results else pd.DataFrame(),
-                "Claude": pd.DataFrame(anthropic_results) if anthropic_results else pd.DataFrame(),
-                "Gemini": pd.DataFrame(google_results) if google_results else pd.DataFrame()
+                "GPT-4": pd.DataFrame([openai_results] if isinstance(openai_results, dict) else (openai_results or [])),
+                "Claude": pd.DataFrame([anthropic_results] if isinstance(anthropic_results, dict) else (anthropic_results or [])),
+                "Gemini": pd.DataFrame([google_results] if isinstance(google_results, dict) else (google_results or []))
             }
             
             # Display results in a table
