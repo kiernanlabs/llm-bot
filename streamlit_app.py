@@ -131,14 +131,12 @@ def call_openai(prompt, run_id=None):
             content = response.output_text
             
             # Show response preview
-            st.write("### Response Preview (first 500 chars):")
+            st.write("### Response Preview:")
             st.text(f"{content[:500]}{'...' if len(content) > 500 else ''}")
             
-            # Show full response in a collapsible section using st.checkbox + conditional display
-            show_full = st.checkbox("Show Full Response", key=f"openai_full{key_suffix}")
-            if show_full:
-                st.write("### Full Raw Response:")
-                st.code(content)
+            # Always show full response
+            st.write("### Full Response:")
+            st.code(content)
             
             parsed_content = json.loads(content)
             
@@ -177,14 +175,12 @@ def call_anthropic(prompt, run_id=None):
             content = response.content[0].text.strip()
             
             # Show response preview
-            st.write("### Response Preview (first 500 chars):")
+            st.write("### Response Preview:")
             st.text(f"{content[:500]}{'...' if len(content) > 500 else ''}")
             
-            # Show full response in a collapsible section using st.checkbox + conditional display
-            show_full = st.checkbox("Show Full Response", key=f"claude_full{key_suffix}")
-            if show_full:
-                st.write("### Full Raw Response:")
-                st.code(content)
+            # Always show full response
+            st.write("### Full Response:")
+            st.code(content)
             
             # Try to find JSON content within the response
             try:
@@ -199,22 +195,16 @@ def call_anthropic(prompt, run_id=None):
                 json_match = re.search(r'\{.*\}', content, re.DOTALL)
                 if json_match:
                     json_str = json_match.group()
-                    st.write(f"Debug: Found JSON in text using regex (preview): {json_str[:200]}{'...' if len(json_str) > 200 else ''}")
+                    st.write(f"Debug: Found JSON in text using regex")
                     
-                    # Show extracted JSON
-                    show_extracted = st.checkbox("Show Extracted JSON", key=f"claude_json{key_suffix}")
-                    if show_extracted:
-                        st.write("### Full Extracted JSON:")
-                        st.code(json_str)
+                    # Always show extracted JSON
+                    st.write("### Extracted JSON:")
+                    st.code(json_str)
                     
                     return json.loads(json_str)
                 else:
                     st.error("Could not find valid JSON in Anthropic response")
                     return None
-            except Exception as e:
-                st.error(f"Anthropic API Error: {str(e)}")
-                st.write(f"Debug: Exception details: {str(e)}")
-                return None
         except Exception as e:
             st.error(f"Anthropic API Error: {str(e)}")
             st.write(f"Debug: Exception details: {str(e)}")
@@ -243,14 +233,12 @@ def call_google(prompt, run_id=None):
             content = response.text.strip()
             
             # Show response preview
-            st.write("### Response Preview (first 500 chars):")
+            st.write("### Response Preview:")
             st.text(f"{content[:500]}{'...' if len(content) > 500 else ''}")
             
-            # Show full response in a collapsible section using st.checkbox + conditional display
-            show_full = st.checkbox("Show Full Response", key=f"gemini_full{key_suffix}")
-            if show_full:
-                st.write("### Full Raw Response:")
-                st.code(content)
+            # Always show full response
+            st.write("### Full Response:")
+            st.code(content)
             
             # Try to parse the JSON response
             try:
@@ -264,22 +252,16 @@ def call_google(prompt, run_id=None):
                 json_match = re.search(r'\{.*\}', content, re.DOTALL)
                 if json_match:
                     json_str = json_match.group()
-                    st.write(f"Debug: Found JSON in text using regex (preview): {json_str[:200]}{'...' if len(json_str) > 200 else ''}")
+                    st.write(f"Debug: Found JSON in text using regex")
                     
-                    # Show extracted JSON
-                    show_extracted = st.checkbox("Show Extracted JSON", key=f"gemini_json{key_suffix}")
-                    if show_extracted:
-                        st.write("### Full Extracted JSON:")
-                        st.code(json_str)
+                    # Always show extracted JSON
+                    st.write("### Extracted JSON:")
+                    st.code(json_str)
                     
                     return json.loads(json_str)
                 else:
                     st.error("Could not find valid JSON in Google response")
                     return None
-            except Exception as e:
-                st.error(f"Google API Error: {str(e)}")
-                st.write(f"Debug: Exception details: {str(e)}")
-                return None
         except Exception as e:
             st.error(f"Google API Error: {str(e)}")
             st.write(f"Debug: Exception details: {str(e)}")
