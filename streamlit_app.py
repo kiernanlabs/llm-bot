@@ -33,6 +33,12 @@ Results will be displayed in a comparative table showing rankings from each mode
 if 'debug_logs' not in st.session_state:
     st.session_state.debug_logs = []
 
+# Initialize results storage in session state
+if 'all_results' not in st.session_state:
+    st.session_state.all_results = None
+if 'has_run_query' not in st.session_state:
+    st.session_state.has_run_query = False
+
 # Function to add a log entry
 def add_debug_log(model, run_id, message, level="INFO", data=None):
     timestamp = datetime.now().strftime("%H:%M:%S")
@@ -282,6 +288,9 @@ def normalize_url(url):
 # Submit button
 if st.button("Research Companies"):
     if query:
+        # Set flag to indicate query is running
+        st.session_state.has_run_query = True
+        
         with st.spinner("Researching companies using multiple AI models..."):
             # Create layout for different sections
             progress_container = st.container()
@@ -452,6 +461,9 @@ if st.button("Research Companies"):
                 # Add normalized URL for grouping
                 all_results["Normalized URL"] = all_results["URL"].apply(normalize_url)
                 
+                # Store in session state for persistence
+                st.session_state.all_results = all_results
+                
                 with tab2:
                     # Display run summary
                     st.markdown("### Run Summary")
@@ -468,7 +480,7 @@ if st.button("Research Companies"):
                     st.download_button(
                         label="💾 Download Full Dataset as CSV",
                         data=csv,
-                        file_name=f"company_research_{query[:20].replace(' ', '_').lower()}.csv",
+                        file_name=f"company_research_{query[:20].replace(' ', '_').lower() if query else 'results'}.csv",
                         mime="text/csv",
                         help="Download the complete raw dataset for all runs and models"
                     )
@@ -489,6 +501,8 @@ if st.button("Research Companies"):
                     
                     # Calculate the number of filtered runs
                     filtered_runs = len(filtered_results["Source Model"].unique()) * runs_per_model
+                    if filtered_runs == 0:  # Avoid division by zero
+                        filtered_runs = 1
                     
                     # Group by URL to get stats
                     url_stats = {}
@@ -536,48 +550,252 @@ if st.button("Research Companies"):
                     
                     # Convert to dataframe and sort
                     stats_df = pd.DataFrame(url_stats.values())
-                    stats_df = stats_df.sort_values(by=["Visibility Score", "Appearance %", "Average Rank"], 
-                                                   ascending=[False, False, True])
-                    
-                    # Display the consolidated results
-                    filter_text = ", ".join(selected_models) if "All" not in selected_models else "All Models"
-                    st.markdown(f"### Consolidated Results ({filter_text})")
-                    
-                    # Display the table
-                    for _, row in stats_df.iterrows():
-                        cols = st.columns([3, 1, 1, 1, 2])
+                    if not stats_df.empty:
+                        stats_df = stats_df.sort_values(by=["Visibility Score", "Appearance %", "Average Rank"], 
+                                                       ascending=[False, False, True])
                         
-                        # Column 1: Company Name and URL
-                        cols[0].markdown(f"**{row['Company Name']}**")
-                        cols[0].markdown(f"[{row['URL']}]({row['URL']})")
+                        # Display the consolidated results
+                        filter_text = ", ".join(selected_models) if "All" not in selected_models else "All Models"
+                        st.markdown(f"### Consolidated Results ({filter_text})")
                         
-                        # Column 2: Appearance %
-                        cols[1].metric("Appearance", f"{row['Appearance %']:.0f}%")
+                        # Display the table
+                        for _, row in stats_df.iterrows():
+                            cols = st.columns([3, 1, 1, 1, 2])
+                            
+                            # Column 1: Company Name and URL
+                            cols[0].markdown(f"**{row['Company Name']}**")
+                            cols[0].markdown(f"[{row['URL']}]({row['URL']})")
+                            
+                            # Column 2: Appearance %
+                            cols[1].metric("Appearance", f"{row['Appearance %']:.0f}%")
+                            
+                            # Column 3: Average Rank
+                            cols[2].metric("Avg Rank", f"{row['Average Rank']:.1f}")
+                            
+                            # Column 4: Visibility Score
+                            cols[3].metric("Visibility", f"{row['Visibility Score']:.0f}")
+                            
+                            # Column 5: Commentaries Expander
+                            with cols[4].expander("View Differentiators"):
+                                for model_run, commentary in row["Commentaries"].items():
+                                    st.markdown(f"**{model_run}:**")
+                                    st.markdown(commentary)
+                                    st.markdown("---")
                         
-                        # Column 3: Average Rank
-                        cols[2].metric("Avg Rank", f"{row['Average Rank']:.1f}")
-                        
-                        # Column 4: Visibility Score
-                        cols[3].metric("Visibility", f"{row['Visibility Score']:.0f}")
-                        
-                        # Column 5: Commentaries Expander
-                        with cols[4].expander("View Differentiators"):
-                            for model_run, commentary in row["Commentaries"].items():
-                                st.markdown(f"**{model_run}:**")
-                                st.markdown(commentary)
-                                st.markdown("---")
-                    
-                    # Display raw data for debugging
-                    with st.expander("View Raw Data"):
-                        st.markdown("### URL Normalization")
-                        url_mapping = filtered_results[["URL", "Normalized URL"]].drop_duplicates()
-                        st.dataframe(url_mapping)
-                        
-                        st.markdown("### Complete Dataset")
-                        st.dataframe(filtered_results)
+                        # Display raw data for debugging
+                        with st.expander("View Raw Data"):
+                            st.markdown("### URL Normalization")
+                            url_mapping = filtered_results[["URL", "Normalized URL"]].drop_duplicates()
+                            st.dataframe(url_mapping)
+                            
+                            st.markdown("### Complete Dataset")
+                            st.dataframe(filtered_results)
+                    else:
+                        st.warning("No results match the selected filters. Please select different models.")
             else:
                 with tab2:
                     st.error("All model runs failed to return valid results. Please try again.")
                     st.stop()
     else:
         st.warning("Please enter a research query.")
+        
+# Display results if they exist in session state (for when filters change)
+if st.session_state.has_run_query and st.session_state.all_results is not None:
+    # Create tabs layout again (needed since we're outside the button click)
+    tab1, tab2, tab3 = st.tabs(["Progress", "Results", "Debug Logs"])
+    
+    with tab2:
+        # Access the stored results
+        all_results = st.session_state.all_results
+        
+        # Display run summary
+        st.markdown("### Run Summary")
+        summary_cols = st.columns(3)
+        
+        runs_per_model = 5
+        total_runs = runs_per_model * len(all_results["Source Model"].unique())
+        total_companies = all_results["Normalized URL"].nunique()
+        completed_runs = len(all_results) // 10  # Estimate based on typical results
+        
+        summary_cols[0].metric("Completed Runs", f"{completed_runs}/{total_runs}")
+        summary_cols[1].metric("Unique Companies", f"{total_companies}")
+        summary_cols[2].metric("Data Points", f"{len(all_results)}")
+        
+        # Add download button at the top of the results tab
+        st.markdown("### Download Data")
+        csv = all_results.to_csv(index=False)
+        st.download_button(
+            label="💾 Download Full Dataset as CSV",
+            data=csv,
+            file_name=f"company_research_{query[:20].replace(' ', '_').lower() if query else 'results'}.csv",
+            mime="text/csv",
+            help="Download the complete raw dataset for all runs and models"
+        )
+        
+        # Add model filtering
+        st.markdown("### Filter Results")
+        selected_models = st.multiselect(
+            "Filter by Model",
+            options=["OpenAI", "Claude", "Gemini", "All"],
+            default=["All"],
+            key="results_model_filter"
+        )
+        
+        # Filter results based on selected models
+        filtered_results = all_results
+        if "All" not in selected_models:
+            filtered_results = all_results[all_results["Source Model"].isin(selected_models)]
+        
+        # Calculate the number of filtered runs
+        filtered_runs = len(filtered_results["Source Model"].unique()) * runs_per_model
+        if filtered_runs == 0:  # Avoid division by zero
+            filtered_runs = 1
+        
+        # Group by URL to get stats
+        url_stats = {}
+        
+        for norm_url in filtered_results["Normalized URL"].unique():
+            # Get all entries for this normalized URL
+            url_entries = filtered_results[filtered_results["Normalized URL"] == norm_url]
+            
+            # Calculate metrics across all runs
+            runs_appeared_in = len(url_entries)
+            appearance_pct = (runs_appeared_in / filtered_runs) * 100
+            avg_rank = url_entries["Rank"].mean()
+            
+            # Calculate visibility score (10 points for #1, 9 points for #2, etc.)
+            visibility_score = 0
+            for _, row in url_entries.iterrows():
+                rank = row["Rank"]
+                # Award points based on rank (max 10 points for rank 1)
+                if 1 <= rank <= 10:
+                    visibility_score += (11 - rank)
+            
+            # Get company name (use most common one if different across runs)
+            company_name = url_entries["Company Name"].mode()[0]
+            
+            # Get the most common actual URL for display
+            display_url = url_entries["URL"].mode()[0]
+            
+            # Store the commentaries from each model and run
+            commentaries = {}
+            for _, row in url_entries.iterrows():
+                model_run = f"{row['Source Model']} (Run {row['Run Number']})"
+                commentaries[model_run] = row["Commentary on Differentiators"]
+            
+            # Store the stats
+            url_stats[norm_url] = {
+                "Company Name": company_name,
+                "URL": display_url,
+                "Normalized URL": norm_url,
+                "Runs Appeared": runs_appeared_in,
+                "Appearance %": appearance_pct,
+                "Average Rank": avg_rank,
+                "Visibility Score": visibility_score,
+                "Commentaries": commentaries
+            }
+        
+        # Convert to dataframe and sort
+        stats_df = pd.DataFrame(url_stats.values())
+        if not stats_df.empty:
+            stats_df = stats_df.sort_values(by=["Visibility Score", "Appearance %", "Average Rank"], 
+                                           ascending=[False, False, True])
+            
+            # Display the consolidated results
+            filter_text = ", ".join(selected_models) if "All" not in selected_models else "All Models"
+            st.markdown(f"### Consolidated Results ({filter_text})")
+            
+            # Display the table
+            for _, row in stats_df.iterrows():
+                cols = st.columns([3, 1, 1, 1, 2])
+                
+                # Column 1: Company Name and URL
+                cols[0].markdown(f"**{row['Company Name']}**")
+                cols[0].markdown(f"[{row['URL']}]({row['URL']})")
+                
+                # Column 2: Appearance %
+                cols[1].metric("Appearance", f"{row['Appearance %']:.0f}%")
+                
+                # Column 3: Average Rank
+                cols[2].metric("Avg Rank", f"{row['Average Rank']:.1f}")
+                
+                # Column 4: Visibility Score
+                cols[3].metric("Visibility", f"{row['Visibility Score']:.0f}")
+                
+                # Column 5: Commentaries Expander
+                with cols[4].expander("View Differentiators"):
+                    for model_run, commentary in row["Commentaries"].items():
+                        st.markdown(f"**{model_run}:**")
+                        st.markdown(commentary)
+                        st.markdown("---")
+            
+            # Display raw data for debugging
+            with st.expander("View Raw Data"):
+                st.markdown("### URL Normalization")
+                url_mapping = filtered_results[["URL", "Normalized URL"]].drop_duplicates()
+                st.dataframe(url_mapping)
+                
+                st.markdown("### Complete Dataset")
+                st.dataframe(filtered_results)
+        else:
+            st.warning("No results match the selected filters. Please select different models.")
+    
+    # Show debug logs tab content
+    with tab3:
+        st.markdown("### Debug Logs")
+        
+        # Add log filtering options
+        log_filter_cols = st.columns(3)
+        with log_filter_cols[0]:
+            selected_models = st.multiselect(
+                "Filter by Model",
+                options=["OpenAI", "Claude", "Gemini", "All"],
+                default=["All"],
+                key="debug_model_filter"
+            )
+        
+        with log_filter_cols[1]:
+            selected_levels = st.multiselect(
+                "Filter by Level",
+                options=["INFO", "WARNING", "ERROR", "DEBUG", "All"],
+                default=["All"],
+                key="debug_level_filter"
+            )
+        
+        with log_filter_cols[2]:
+            clear_logs = st.button("Clear Logs")
+            if clear_logs:
+                st.session_state.debug_logs = []
+                st.experimental_rerun()
+        
+        # Apply filters
+        filtered_logs = st.session_state.debug_logs
+        if "All" not in selected_models:
+            filtered_logs = [log for log in filtered_logs if log["model"] in selected_models]
+        
+        if "All" not in selected_levels:
+            filtered_logs = [log for log in filtered_logs if log["level"] in selected_levels]
+        
+        # Display logs in a table
+        if filtered_logs:
+            log_table = []
+            for log in filtered_logs:
+                row = {
+                    "Time": log["timestamp"],
+                    "Model": log["model"],
+                    "Run": log["run_id"],
+                    "Level": log["level"],
+                    "Message": log["message"]
+                }
+                log_table.append(row)
+            
+            st.dataframe(log_table)
+            
+            # Always show log content
+            st.markdown("### Log Content")
+            for i, log in enumerate(filtered_logs):
+                if log.get("data"):
+                    with st.expander(f"{log['timestamp']} - {log['model']} - {log['message']}"):
+                        st.code(log["data"])
+        else:
+            st.info("No logs matching the selected filters.")
