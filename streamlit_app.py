@@ -80,192 +80,186 @@ def add_json_instructions(base_prompt):
     Do not include backticks or code blocks (```).
     """
 
-# Function to call OpenAI
-def call_openai(prompt, run_id=None):
-    key_suffix = f"_{run_id}" if run_id is not None else ""
-    with st.expander(f"OpenAI Debug Output{key_suffix}", expanded=False):
-        try:
-            st.write("Debug: Sending request to OpenAI...")
-            st.write(f"Debug: Using model: {openai_model}")
-            
-            # Define the JSON schema for the companies list
-            companies_schema = {
-                "type": "object",
-                "properties": {
-                    "companies": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "Rank": {"type": "integer"},
-                                "Company Name": {"type": "string"},
-                                "URL": {"type": "string"},
-                                "Commentary on Differentiators": {"type": "string"}
-                            },
-                            "required": ["Rank", "Company Name", "URL", "Commentary on Differentiators"],
-                            "additionalProperties": False
-                        }
-                    }
-                },
-                "required": ["companies"],
-                "additionalProperties": False
-            }
-            
-            # Use the responses API with schema validation
-            response = openai_client.responses.create(
-                model=openai_model,
-                input=[{"role": "user", "content": prompt}],
-                text={
-                    "format": {
-                        "type": "json_schema",
-                        "name": "company_research",
-                        "schema": companies_schema,
-                        "strict": True
+# Function to call OpenAI with embedded output instead of expanders
+def call_openai_embedded(prompt, run_id=None):
+    try:
+        st.write("🔄 **Sending request to OpenAI...**")
+        st.write(f"Using model: {openai_model}")
+        
+        # Define the JSON schema for the companies list
+        companies_schema = {
+            "type": "object",
+            "properties": {
+                "companies": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "Rank": {"type": "integer"},
+                            "Company Name": {"type": "string"},
+                            "URL": {"type": "string"},
+                            "Commentary on Differentiators": {"type": "string"}
+                        },
+                        "required": ["Rank", "Company Name", "URL", "Commentary on Differentiators"],
+                        "additionalProperties": False
                     }
                 }
-            )
-            
-            st.write("Debug: Received response from OpenAI")
-            
-            # Extract and parse the structured JSON response
-            content = response.output_text
-            
-            # Show response preview
-            st.write("### Response Preview:")
-            st.text(f"{content[:500]}{'...' if len(content) > 500 else ''}")
-            
-            # Always show full response
-            st.write("### Full Response:")
+            },
+            "required": ["companies"],
+            "additionalProperties": False
+        }
+        
+        # Use the responses API with schema validation
+        response = openai_client.responses.create(
+            model=openai_model,
+            input=[{"role": "user", "content": prompt}],
+            text={
+                "format": {
+                    "type": "json_schema",
+                    "name": "company_research",
+                    "schema": companies_schema,
+                    "strict": True
+                }
+            }
+        )
+        
+        st.write("✅ **Response received from OpenAI**")
+        
+        # Extract and parse the structured JSON response
+        content = response.output_text
+        
+        # Show response preview
+        st.write("**Response Preview:**")
+        st.text(f"{content[:500]}{'...' if len(content) > 500 else ''}")
+        
+        # Always show full response
+        with st.expander("View Full Response", expanded=False):
             st.code(content)
-            
+        
+        parsed_content = json.loads(content)
+        
+        # Show successful response for debugging
+        st.write("✅ **Successfully parsed JSON response**")
+        return parsed_content
+        
+    except json.JSONDecodeError as e:
+        st.error(f"JSON parsing error: {str(e)}")
+        return None
+    except Exception as e:
+        st.error(f"OpenAI API Error: {str(e)}")
+        st.write(f"Debug: Exception details: {str(e)}")
+        return None
+
+# Function to call Anthropic with embedded output
+def call_anthropic_embedded(prompt, run_id=None):
+    try:
+        # Add JSON formatting instructions for Anthropic
+        formatted_prompt = add_json_instructions(prompt)
+        
+        st.write("🔄 **Sending request to Anthropic...**")
+        st.write(f"Using model: {anthropic_model}")
+        
+        response = anthropic_client.messages.create(
+            model=anthropic_model,
+            max_tokens=1000,
+            messages=[{"role": "user", "content": formatted_prompt}]
+        )
+        
+        st.write("✅ **Response received from Anthropic**")
+        
+        # Extract the text content and ensure it's properly formatted
+        content = response.content[0].text.strip()
+        
+        # Show response preview
+        st.write("**Response Preview:**")
+        st.text(f"{content[:500]}{'...' if len(content) > 500 else ''}")
+        
+        # Always show full response
+        with st.expander("View Full Response", expanded=False):
+            st.code(content)
+        
+        # Try to find JSON content within the response
+        try:
+            # First try direct JSON parsing
             parsed_content = json.loads(content)
-            
-            # Show successful response for debugging
-            st.write("Debug: Successfully parsed JSON response")
+            st.write("✅ **Successfully parsed JSON response**")
             return parsed_content
-            
         except json.JSONDecodeError as e:
-            st.error(f"JSON parsing error: {str(e)}")
-            return None
-        except Exception as e:
-            st.error(f"OpenAI API Error: {str(e)}")
-            st.write(f"Debug: Exception details: {str(e)}")
-            return None
-
-# Function to call Anthropic
-def call_anthropic(prompt, run_id=None):
-    key_suffix = f"_{run_id}" if run_id is not None else ""
-    with st.expander(f"Claude Debug Output{key_suffix}", expanded=False):
-        try:
-            # Add JSON formatting instructions for Anthropic
-            formatted_prompt = add_json_instructions(prompt)
-            
-            st.write("Debug: Sending request to Anthropic...")
-            st.write(f"Debug: Using model: {anthropic_model}")
-            
-            response = anthropic_client.messages.create(
-                model=anthropic_model,
-                max_tokens=1000,
-                messages=[{"role": "user", "content": formatted_prompt}]
-            )
-            
-            st.write("Debug: Received response from Anthropic")
-            
-            # Extract the text content and ensure it's properly formatted
-            content = response.content[0].text.strip()
-            
-            # Show response preview
-            st.write("### Response Preview:")
-            st.text(f"{content[:500]}{'...' if len(content) > 500 else ''}")
-            
-            # Always show full response
-            st.write("### Full Response:")
-            st.code(content)
-            
-            # Try to find JSON content within the response
-            try:
-                # First try direct JSON parsing
-                parsed_content = json.loads(content)
-                st.write("Debug: Successfully parsed JSON response")
-                return parsed_content
-            except json.JSONDecodeError as e:
-                st.write(f"Debug: JSON parsing failed with error: {str(e)}")
-                # If that fails, try to extract JSON from the text
-                import re
-                json_match = re.search(r'\{.*\}', content, re.DOTALL)
-                if json_match:
-                    json_str = json_match.group()
-                    st.write(f"Debug: Found JSON in text using regex")
-                    
-                    # Always show extracted JSON
-                    st.write("### Extracted JSON:")
+            st.write(f"⚠️ **JSON parsing failed:** {str(e)}")
+            # If that fails, try to extract JSON from the text
+            import re
+            json_match = re.search(r'\{.*\}', content, re.DOTALL)
+            if json_match:
+                json_str = json_match.group()
+                st.write("🔍 **Found JSON in text using regex**")
+                
+                # Always show extracted JSON
+                with st.expander("View Extracted JSON", expanded=False):
                     st.code(json_str)
-                    
-                    return json.loads(json_str)
-                else:
-                    st.error("Could not find valid JSON in Anthropic response")
-                    return None
-        except Exception as e:
-            st.error(f"Anthropic API Error: {str(e)}")
-            st.write(f"Debug: Exception details: {str(e)}")
-            return None
-
-# Function to call Google
-def call_google(prompt, run_id=None):
-    key_suffix = f"_{run_id}" if run_id is not None else ""
-    with st.expander(f"Gemini Debug Output{key_suffix}", expanded=False):
-        try:
-            # Add JSON formatting instructions for Google
-            formatted_prompt = add_json_instructions(prompt)
-            
-            st.write("Debug: Sending request to Google Gemini...")
-            st.write(f"Debug: Using model: {google_model}")
-            
-            model = genai.GenerativeModel(google_model)
-            response = model.generate_content(formatted_prompt)
-            
-            st.write("Debug: Received response from Google")
-            
-            if not response or not response.text:
-                st.error("Google returned empty response")
+                
+                return json.loads(json_str)
+            else:
+                st.error("❌ **Could not find valid JSON in Anthropic response**")
                 return None
-            
-            content = response.text.strip()
-            
-            # Show response preview
-            st.write("### Response Preview:")
-            st.text(f"{content[:500]}{'...' if len(content) > 500 else ''}")
-            
-            # Always show full response
-            st.write("### Full Response:")
-            st.code(content)
-            
-            # Try to parse the JSON response
-            try:
-                parsed_content = json.loads(content)
-                st.write("Debug: Successfully parsed JSON response")
-                return parsed_content
-            except json.JSONDecodeError as e:
-                st.write(f"Debug: JSON parsing failed with error: {str(e)}")
-                # If that fails, try to extract JSON from the text
-                import re
-                json_match = re.search(r'\{.*\}', content, re.DOTALL)
-                if json_match:
-                    json_str = json_match.group()
-                    st.write(f"Debug: Found JSON in text using regex")
-                    
-                    # Always show extracted JSON
-                    st.write("### Extracted JSON:")
-                    st.code(json_str)
-                    
-                    return json.loads(json_str)
-                else:
-                    st.error("Could not find valid JSON in Google response")
-                    return None
-        except Exception as e:
-            st.error(f"Google API Error: {str(e)}")
-            st.write(f"Debug: Exception details: {str(e)}")
+    except Exception as e:
+        st.error(f"Anthropic API Error: {str(e)}")
+        st.write(f"Debug: Exception details: {str(e)}")
+        return None
+
+# Function to call Google with embedded output
+def call_google_embedded(prompt, run_id=None):
+    try:
+        # Add JSON formatting instructions for Google
+        formatted_prompt = add_json_instructions(prompt)
+        
+        st.write("🔄 **Sending request to Google Gemini...**")
+        st.write(f"Using model: {google_model}")
+        
+        model = genai.GenerativeModel(google_model)
+        response = model.generate_content(formatted_prompt)
+        
+        st.write("✅ **Response received from Google**")
+        
+        if not response or not response.text:
+            st.error("❌ **Google returned empty response**")
             return None
+        
+        content = response.text.strip()
+        
+        # Show response preview
+        st.write("**Response Preview:**")
+        st.text(f"{content[:500]}{'...' if len(content) > 500 else ''}")
+        
+        # Always show full response
+        with st.expander("View Full Response", expanded=False):
+            st.code(content)
+        
+        # Try to parse the JSON response
+        try:
+            parsed_content = json.loads(content)
+            st.write("✅ **Successfully parsed JSON response**")
+            return parsed_content
+        except json.JSONDecodeError as e:
+            st.write(f"⚠️ **JSON parsing failed:** {str(e)}")
+            # If that fails, try to extract JSON from the text
+            import re
+            json_match = re.search(r'\{.*\}', content, re.DOTALL)
+            if json_match:
+                json_str = json_match.group()
+                st.write("🔍 **Found JSON in text using regex**")
+                
+                # Always show extracted JSON
+                with st.expander("View Extracted JSON", expanded=False):
+                    st.code(json_str)
+                
+                return json.loads(json_str)
+            else:
+                st.error("❌ **Could not find valid JSON in Google response**")
+                return None
+    except Exception as e:
+        st.error(f"Google API Error: {str(e)}")
+        st.write(f"Debug: Exception details: {str(e)}")
+        return None
 
 # Function to normalize URLs (extract just the domain)
 def normalize_url(url):
@@ -302,100 +296,95 @@ if st.button("Research Companies"):
             # Initialize results containers
             all_results_list = []
             
-            # Pre-create all expanders to show the full queue
-            expanders = {}
-            for model_name in ["OpenAI", "Claude", "Gemini"]:
-                expanders[model_name] = {}
-                st.markdown(f"#### {model_name}")
-                
-                # Create expanders for each run
-                for run_num in range(1, runs_per_model + 1):
-                    run_id = f"{model_name}_run{run_num}"
-                    # Create expander with pending status
-                    expanders[model_name][run_num] = st.expander(
-                        f"⏳ {model_name} - Run {run_num}/{runs_per_model}: Pending", 
-                        expanded=False
-                    )
-                    with expanders[model_name][run_num]:
-                        st.info("This run is queued and will execute in sequence.")
+            # Create progress bars
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            
+            # Initialize counters
+            completed_runs = 0
+            total_runs = runs_per_model * 3
             
             # Run each model multiple times
             for model_name in ["OpenAI", "Claude", "Gemini"]:
+                st.markdown(f"#### {model_name}")
+                
                 # Run the model multiple times
                 for run_num in range(1, runs_per_model + 1):
                     run_id = f"{model_name}_run{run_num}"
                     
-                    # Update expander to show it's in progress
-                    expander = expanders[model_name][run_num]
-                    expander.header(f"🔄 {model_name} - Run {run_num}/{runs_per_model}: In Progress")
+                    # Update status
+                    status_text.text(f"Processing: {model_name} - Run {run_num}/{runs_per_model}")
                     
-                    # Prepare for results
-                    success = False
-                    result = None
-                    error_msg = None
-                    
-                    try:
-                        # Call the appropriate model inside the expander
-                        with expander:
+                    # Create a single expander for this run
+                    with st.expander(f"🔄 {model_name} - Run {run_num}/{runs_per_model}", expanded=False):
+                        st.markdown(f"**{model_name} - Run {run_num}/{runs_per_model}**")
+                        
+                        # Execute the query and embed the output directly
+                        try:
+                            # Call the appropriate model with embedded output
                             if model_name == "OpenAI":
-                                result = call_openai(get_prompt(query), run_id)
+                                result = call_openai_embedded(get_prompt(query), run_id)
                             elif model_name == "Claude":
-                                result = call_anthropic(get_prompt(query), run_id)
+                                result = call_anthropic_embedded(get_prompt(query), run_id)
                             else:  # Gemini
-                                result = call_google(get_prompt(query), run_id)
+                                result = call_google_embedded(get_prompt(query), run_id)
                             
                             # Process the result if valid
                             if result:
-                                success = True
+                                st.success(f"✅ **{model_name} - Run {run_num}/{runs_per_model} completed successfully**")
+                                
+                                # Process the result based on its format
+                                df = pd.DataFrame()
+                                
+                                if model_name == "OpenAI" and "companies" in result:
+                                    df = pd.DataFrame(result["companies"])
+                                elif "companies" in result:
+                                    df = pd.DataFrame(result["companies"])
+                                elif isinstance(result, list):
+                                    df = pd.DataFrame(result)
+                                elif result:
+                                    df = pd.DataFrame([result])
+                                
+                                # Add source metadata to the results
+                                if not df.empty:
+                                    # Normalize column names
+                                    column_map = {}
+                                    for col in df.columns:
+                                        if col.lower() == "rank":
+                                            column_map[col] = "Rank"
+                                        elif col.lower() in ["company", "company name", "name"]:
+                                            column_map[col] = "Company Name"
+                                        elif col.lower() in ["url", "website", "link"]:
+                                            column_map[col] = "URL"
+                                        elif col.lower() in ["commentary", "differentiators", "commentary on differentiators"]:
+                                            column_map[col] = "Commentary on Differentiators"
+                                    
+                                    # Rename columns if needed
+                                    if column_map:
+                                        df.rename(columns=column_map, inplace=True)
+                                    
+                                    # Add source information
+                                    df["Source Model"] = model_name
+                                    df["Run Number"] = run_num
+                                    
+                                    # Show a preview of the data
+                                    st.write("**Results Preview:**")
+                                    st.dataframe(df.head())
+                                    
+                                    # Add to all results
+                                    all_results_list.append(df)
                             else:
-                                error_msg = "Model returned no data"
-                    except Exception as e:
-                        error_msg = str(e)
+                                st.error(f"❌ **{model_name} - Run {run_num}/{runs_per_model} failed: No valid results returned**")
+                        except Exception as e:
+                            st.error(f"❌ **{model_name} - Run {run_num}/{runs_per_model} failed with error: {str(e)}**")
                     
-                    # Update expander header based on result
-                    if success:
-                        expander.header(f"✅ {model_name} - Run {run_num}/{runs_per_model}: Complete")
-                        
-                        # Process the result based on its format
-                        df = pd.DataFrame()
-                        
-                        if model_name == "OpenAI" and "companies" in result:
-                            df = pd.DataFrame(result["companies"])
-                        elif "companies" in result:
-                            df = pd.DataFrame(result["companies"])
-                        elif isinstance(result, list):
-                            df = pd.DataFrame(result)
-                        elif result:
-                            df = pd.DataFrame([result])
-                        
-                        # Add source metadata to the results
-                        if not df.empty:
-                            # Normalize column names
-                            column_map = {}
-                            for col in df.columns:
-                                if col.lower() == "rank":
-                                    column_map[col] = "Rank"
-                                elif col.lower() in ["company", "company name", "name"]:
-                                    column_map[col] = "Company Name"
-                                elif col.lower() in ["url", "website", "link"]:
-                                    column_map[col] = "URL"
-                                elif col.lower() in ["commentary", "differentiators", "commentary on differentiators"]:
-                                    column_map[col] = "Commentary on Differentiators"
-                            
-                            # Rename columns if needed
-                            if column_map:
-                                df.rename(columns=column_map, inplace=True)
-                            
-                            # Add source information
-                            df["Source Model"] = model_name
-                            df["Run Number"] = run_num
-                            
-                            # Add to all results
-                            all_results_list.append(df)
-                    else:
-                        expander.header(f"❌ {model_name} - Run {run_num}/{runs_per_model}: Failed")
-                        with expander:
-                            st.error(f"Error: {error_msg}")
+                    # Update progress
+                    completed_runs += 1
+                    progress_bar.progress(completed_runs / total_runs)
+            
+            # Clear the progress indicators when done
+            status_text.empty()
+            progress_bar.empty()
             
             # Combine all results
             if all_results_list:
@@ -488,28 +477,28 @@ if st.button("Research Companies"):
                             st.markdown(f"**{model_run}:**")
                             st.markdown(commentary)
                             st.markdown("---")
+                
+                # Add download button for the complete dataset
+                st.markdown("### Download Data")
+                csv = all_results.to_csv(index=False)
+                st.download_button(
+                    label="💾 Download Full Dataset as CSV",
+                    data=csv,
+                    file_name=f"company_research_{query[:20].replace(' ', '_').lower()}.csv",
+                    mime="text/csv",
+                    help="Download the complete raw dataset for all runs and models"
+                )
+                
+                # Display raw data for debugging
+                with st.expander("View Raw Data"):
+                    st.markdown("### URL Normalization")
+                    url_mapping = all_results[["URL", "Normalized URL"]].drop_duplicates()
+                    st.dataframe(url_mapping)
+                    
+                    st.markdown("### Complete Dataset")
+                    st.dataframe(all_results)
             else:
                 st.error("All model runs failed to return valid results. Please try again.")
                 st.stop()
-            
-            # Display raw data for debugging
-            with st.expander("View Raw Data"):
-                st.markdown("### URL Normalization")
-                if not all_results.empty:
-                    url_mapping = all_results[["URL", "Normalized URL"]].drop_duplicates()
-                    st.dataframe(url_mapping)
-                
-                st.markdown("### Complete Dataset")
-                if not all_results.empty:
-                    st.dataframe(all_results)
-                    
-                    # Add CSV download button
-                    csv = all_results.to_csv(index=False)
-                    st.download_button(
-                        label="Download Full Dataset as CSV",
-                        data=csv,
-                        file_name=f"company_research_{query[:20].replace(' ', '_').lower()}.csv",
-                        mime="text/csv"
-                    )
     else:
         st.warning("Please enter a research query.")
