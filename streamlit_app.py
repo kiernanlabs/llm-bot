@@ -38,6 +38,28 @@ def get_prompt(query):
     Query: {query}
     """
 
+# Helper function to add JSON formatting instructions for non-OpenAI models
+def add_json_instructions(base_prompt):
+    return base_prompt + """
+    
+    IMPORTANT: You must respond ONLY with a valid JSON object in the following format:
+    {
+        "companies": [
+            {
+                "Rank": 1,
+                "Company Name": "Example Corp",
+                "URL": "https://example.com",
+                "Commentary on Differentiators": "Example commentary"
+            },
+            ...and so on for all 10 companies...
+        ]
+    }
+    
+    Your entire response must be valid JSON that can be parsed with json.loads(). 
+    Do not include any text, explanations, or markdown outside the JSON structure.
+    Do not include backticks or code blocks (```).
+    """
+
 # Function to call OpenAI
 def call_openai(prompt):
     with st.expander("OpenAI Debug Output", expanded=False):
@@ -59,7 +81,8 @@ def call_openai(prompt):
                                 "URL": {"type": "string"},
                                 "Commentary on Differentiators": {"type": "string"}
                             },
-                            "required": ["Rank", "Company Name", "URL", "Commentary on Differentiators"]
+                            "required": ["Rank", "Company Name", "URL", "Commentary on Differentiators"],
+                            "additionalProperties": False
                         }
                     }
                 },
@@ -101,10 +124,13 @@ def call_openai(prompt):
 # Function to call Anthropic
 def call_anthropic(prompt):
     try:
+        # Add JSON formatting instructions for Anthropic
+        formatted_prompt = add_json_instructions(prompt)
+        
         response = anthropic_client.messages.create(
             model="claude-3-7-sonnet-20250219",
             max_tokens=1000,
-            messages=[{"role": "user", "content": prompt}]
+            messages=[{"role": "user", "content": formatted_prompt}]
         )
         # Extract the text content and ensure it's properly formatted
         content = response.content[0].text.strip()
@@ -115,7 +141,7 @@ def call_anthropic(prompt):
         except json.JSONDecodeError:
             # If that fails, try to extract JSON from the text
             import re
-            json_match = re.search(r'\[.*\]', content, re.DOTALL)
+            json_match = re.search(r'\{.*\}', content, re.DOTALL)
             if json_match:
                 return json.loads(json_match.group())
             else:
@@ -130,8 +156,11 @@ def call_anthropic(prompt):
 # Function to call Google
 def call_google(prompt):
     try:
+        # Add JSON formatting instructions for Google
+        formatted_prompt = add_json_instructions(prompt)
+        
         model = genai.GenerativeModel('gemini-2.0-flash')
-        response = model.generate_content(prompt)
+        response = model.generate_content(formatted_prompt)
         
         if not response or not response.text:
             st.error("Google returned empty response")
@@ -145,7 +174,7 @@ def call_google(prompt):
         except json.JSONDecodeError:
             # If that fails, try to extract JSON from the text
             import re
-            json_match = re.search(r'\[.*\]', content, re.DOTALL)
+            json_match = re.search(r'\{.*\}', content, re.DOTALL)
             if json_match:
                 return json.loads(json_match.group())
             else:
