@@ -87,11 +87,7 @@ query = st.text_input(
 
 # Function to format the prompt - kept simple without JSON instructions
 def get_prompt(query):
-    return f"""Based on the following query, provide a list of 10 companies.
-    For each company, include the rank (1-10), company name, URL, and commentary on what differentiates this company.
-    
-    Query: {query}
-    """
+    return f"{query}"
 
 # Function to call OpenAI - simplified to just send the prompt without JSON formatting
 def call_openai(prompt, run_id=None):
