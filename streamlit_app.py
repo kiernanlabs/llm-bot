@@ -85,7 +85,7 @@ query = st.text_input(
     placeholder="e.g., Top AI companies in healthcare"
 )
 
-# Function to format the prompt
+# Function to format the prompt - kept simple without JSON instructions
 def get_prompt(query):
     return f"""Based on the following query, provide a list of 10 companies.
     For each company, include the rank (1-10), company name, URL, and commentary on what differentiates this company.
@@ -93,32 +93,96 @@ def get_prompt(query):
     Query: {query}
     """
 
-# Helper function to add JSON formatting instructions for non-OpenAI models
-def add_json_instructions(base_prompt):
-    return base_prompt + """
-    
-    IMPORTANT: You must respond ONLY with a valid JSON object in the following format:
-    {
-        "companies": [
-            {
-                "Rank": 1,
-                "Company Name": "Example Corp",
-                "URL": "https://example.com",
-                "Commentary on Differentiators": "Example commentary"
-            },
-            ...and so on for all 10 companies...
-        ]
-    }
-    
-    Your entire response must be valid JSON that can be parsed with json.loads(). 
-    Do not include any text, explanations, or markdown outside the JSON structure.
-    Do not include backticks or code blocks (```).
-    """
-
-# Function to call OpenAI
+# Function to call OpenAI - simplified to just send the prompt without JSON formatting
 def call_openai(prompt, run_id=None):
     model_name = "OpenAI"
     add_debug_log(model_name, run_id, f"Starting request to {model_name} with model: {openai_model}")
+    
+    try:
+        # Use the chat completions API with a simple prompt
+        response = openai_client.chat.completions.create(
+            model=openai_model,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        
+        add_debug_log(model_name, run_id, "Response received")
+        
+        # Extract the text content
+        content = response.choices[0].message.content
+        
+        # Log the response content
+        add_debug_log(model_name, run_id, "Response preview", data=content[:500] + ('...' if len(content) > 500 else ''))
+        add_debug_log(model_name, run_id, "Full response", level="DEBUG", data=content)
+        
+        # Return the raw text response, no JSON parsing here
+        return content
+    
+    except Exception as e:
+        add_debug_log(model_name, run_id, f"API Error: {str(e)}", level="ERROR")
+        return None
+
+# Function to call Anthropic - simplified to just send the prompt without JSON formatting
+def call_anthropic(prompt, run_id=None):
+    model_name = "Claude"
+    add_debug_log(model_name, run_id, f"Starting request to {model_name} with model: {anthropic_model}")
+    
+    try:
+        # Simple call to Anthropic API
+        response = anthropic_client.messages.create(
+            model=anthropic_model,
+            max_tokens=4000,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        
+        add_debug_log(model_name, run_id, "Response received")
+        
+        # Extract the text content
+        content = response.content[0].text.strip()
+        
+        # Log the response content
+        add_debug_log(model_name, run_id, "Response preview", data=content[:500] + ('...' if len(content) > 500 else ''))
+        add_debug_log(model_name, run_id, "Full response", level="DEBUG", data=content)
+        
+        # Return the raw text response, no JSON parsing here
+        return content
+    
+    except Exception as e:
+        add_debug_log(model_name, run_id, f"API Error: {str(e)}", level="ERROR")
+        return None
+
+# Function to call Google - simplified to just send the prompt without JSON formatting
+def call_google(prompt, run_id=None):
+    model_name = "Gemini"
+    add_debug_log(model_name, run_id, f"Starting request to {model_name} with model: {google_model}")
+    
+    try:
+        # Simple call to Google API
+        model = genai.GenerativeModel(google_model)
+        response = model.generate_content(prompt)
+        
+        add_debug_log(model_name, run_id, "Response received")
+        
+        if not response or not response.text:
+            add_debug_log(model_name, run_id, "Empty response received", level="ERROR")
+            return None
+        
+        content = response.text.strip()
+        
+        # Log the response content
+        add_debug_log(model_name, run_id, "Response preview", data=content[:500] + ('...' if len(content) > 500 else ''))
+        add_debug_log(model_name, run_id, "Full response", level="DEBUG", data=content)
+        
+        # Return the raw text response, no JSON parsing here
+        return content
+    
+    except Exception as e:
+        add_debug_log(model_name, run_id, f"API Error: {str(e)}", level="ERROR")
+        return None
+
+# NEW FUNCTION: Structure raw model responses using OpenAI
+def structure_response(raw_text, run_id=None, source_model=None):
+    model_name = "OpenAI-Structurer"
+    add_debug_log(model_name, run_id, f"Structuring response from {source_model}", level="INFO")
     
     try:
         # Define the JSON schema for the companies list
@@ -144,10 +208,39 @@ def call_openai(prompt, run_id=None):
             "additionalProperties": False
         }
         
-        # Use the responses API with schema validation
+        # Create the structuring prompt
+        structure_prompt = f"""
+        I will provide you with text that contains a list of companies somewhere in the text. 
+        Extract and structure this information according to the specified format.
+        
+        Here is the text:
+        ```
+        {raw_text}
+        ```
+        
+        Parse this text and return a JSON object with the following structure:
+        {{
+            "companies": [
+                {{
+                    "Rank": (integer between 1-10),
+                    "Company Name": "Name of the company",
+                    "URL": "Website URL of the company",
+                    "Commentary on Differentiators": "Commentary about what makes this company stand out"
+                }},
+                ... (all companies found in the text)
+            ]
+        }}
+        
+        Only include responses that are clearly companies. If any information is missing, use reasonable placeholder text.
+        """
+        
+        # Use a smaller/cheaper model for structuring
+        structure_model = "gpt-4o-mini-2024-07-18"
+        
+        # Use the responses API with schema validation to ensure proper structure
         response = openai_client.responses.create(
-            model=openai_model,
-            input=[{"role": "user", "content": prompt}],
+            model=structure_model,
+            input=[{"role": "user", "content": structure_prompt}],
             text={
                 "format": {
                     "type": "json_schema",
@@ -158,293 +251,19 @@ def call_openai(prompt, run_id=None):
             }
         )
         
-        add_debug_log(model_name, run_id, "Response received")
+        # Extract the structured JSON response
+        structured_content = response.output_text
         
-        # Extract and parse the structured JSON response
-        content = response.output_text
+        # Parse to ensure it's valid
+        parsed_content = json.loads(structured_content)
         
-        # Log the response content
-        add_debug_log(model_name, run_id, "Response preview", data=content[:500] + ('...' if len(content) > 500 else ''))
-        add_debug_log(model_name, run_id, "Full response", level="DEBUG", data=content)
-        
-        parsed_content = json.loads(content)
-        add_debug_log(model_name, run_id, "Successfully parsed JSON response")
+        add_debug_log(model_name, run_id, "Successfully structured response", level="INFO")
+        add_debug_log(model_name, run_id, "Structured content", level="DEBUG", data=structured_content)
         
         return parsed_content
-        
-    except json.JSONDecodeError as e:
-        add_debug_log(model_name, run_id, f"JSON parsing error: {str(e)}", level="ERROR")
-        return None
-    except Exception as e:
-        add_debug_log(model_name, run_id, f"API Error: {str(e)}", level="ERROR")
-        return None
-
-# Function to call Anthropic
-def call_anthropic(prompt, run_id=None):
-    model_name = "Claude"
-    add_debug_log(model_name, run_id, f"Starting request to {model_name} with model: {anthropic_model}")
     
-    try:
-        # Import re module in this scope to ensure it's available
-        import re
-        
-        # Add JSON formatting instructions for Anthropic
-        formatted_prompt = add_json_instructions(prompt)
-        
-        # Make the JSON instructions even more explicit for Claude
-        formatted_prompt += """
-        
-        IMPORTANT FORMATTING RULES:
-        1. Do not use single quotes (') for JSON strings, always use double quotes (")
-        2. Make sure all strings are properly terminated with a closing quote
-        3. Escape any double quotes within strings with a backslash (\")
-        4. Do not include any text, markdown formatting, or code block markers
-        5. The response must be a single, valid JSON object
-        """
-        
-        response = anthropic_client.messages.create(
-            model=anthropic_model,
-            max_tokens=4000,  # Increase max tokens to avoid truncation
-            messages=[{"role": "user", "content": formatted_prompt}]
-        )
-        
-        add_debug_log(model_name, run_id, "Response received")
-        
-        # Extract the text content and ensure it's properly formatted
-        content = response.content[0].text.strip()
-        
-        # Log the response content
-        add_debug_log(model_name, run_id, "Response preview", data=content[:500] + ('...' if len(content) > 500 else ''))
-        add_debug_log(model_name, run_id, "Full response", level="DEBUG", data=content)
-        
-        # Clean up the content to help with JSON parsing
-        def clean_json_string(json_str):
-            # Remove any potential markdown code block syntax
-            json_str = re.sub(r'^```json', '', json_str)
-            json_str = re.sub(r'^```', '', json_str)
-            json_str = re.sub(r'```$', '', json_str)
-            
-            # Remove any text before the first curly brace or after the last curly brace
-            first_brace = json_str.find('{')
-            last_brace = json_str.rfind('}')
-            
-            if first_brace != -1 and last_brace != -1:
-                json_str = json_str[first_brace:last_brace+1]
-            
-            return json_str.strip()
-        
-        # Check for truncated JSON response
-        def fix_truncated_json(json_str):
-            # Look for incomplete JSON structure (missing closing braces)
-            open_braces = json_str.count('{')
-            close_braces = json_str.count('}')
-            
-            # If we have unclosed braces, attempt to fix
-            if open_braces > close_braces:
-                add_debug_log(model_name, run_id, f"Detected truncated JSON: {open_braces} opening braces vs {close_braces} closing braces", level="WARNING")
-                
-                # Check for incomplete company entry
-                if json_str.endswith('"Commentary on Differentiators": "'):
-                    json_str += '"}]}'
-                elif '"Commentary on Differentiators": "' in json_str and not json_str.endswith('}'):
-                    # Find the last quote that might be missing a closing
-                    last_quote_pos = json_str.rfind('"')
-                    if last_quote_pos > 0 and json_str[last_quote_pos-1] != '\\':
-                        json_str = json_str[:last_quote_pos+1] + '"}]}'
-                else:
-                    # Add the necessary closing braces
-                    for _ in range(open_braces - close_braces):
-                        if json_str.rstrip().endswith('"') or json_str.rstrip().endswith(','):
-                            # If ending with quote or comma, assume we need to close an object
-                            json_str += '"}]}'
-                            break
-                        else:
-                            json_str += '}'
-            
-            return json_str
-        
-        # Function to ask the model to fix its own JSON
-        def ask_model_to_fix_json(original_content, error_message):
-            add_debug_log(model_name, run_id, "Asking model to fix its own JSON", level="INFO")
-            
-            fix_prompt = f"""
-            You previously provided a JSON response that could not be parsed due to the following error:
-            {error_message}
-            
-            Here is your original response:
-            {original_content}
-            
-            Please fix the JSON formatting issues and provide a valid, parsable JSON object. 
-            Only respond with the corrected JSON. No explanation, no markdown, no code blocks.
-            Make sure the response is complete and all brackets are closed properly.
-            """
-            
-            try:
-                # Send request to fix the JSON
-                fix_response = anthropic_client.messages.create(
-                    model=anthropic_model,
-                    max_tokens=4000,
-                    messages=[{"role": "user", "content": fix_prompt}]
-                )
-                
-                fixed_content = fix_response.content[0].text.strip()
-                add_debug_log(model_name, run_id, "Model provided fixed JSON", level="INFO")
-                add_debug_log(model_name, run_id, "Fixed JSON response", level="DEBUG", data=fixed_content)
-                
-                # Clean the fixed content
-                return clean_json_string(fixed_content)
-            except Exception as fix_error:
-                add_debug_log(model_name, run_id, f"Error asking model to fix JSON: {str(fix_error)}", level="ERROR")
-                return None
-        
-        # Clean the content
-        cleaned_content = clean_json_string(content)
-        # Fix truncated JSON if needed
-        cleaned_content = fix_truncated_json(cleaned_content)
-        add_debug_log(model_name, run_id, "Cleaned JSON", level="DEBUG", data=cleaned_content)
-        
-        # Try to find JSON content within the response
-        try:
-            # First try direct JSON parsing
-            parsed_content = json.loads(cleaned_content)
-            add_debug_log(model_name, run_id, "Successfully parsed JSON response")
-            return parsed_content
-        except json.JSONDecodeError as e:
-            add_debug_log(model_name, run_id, f"JSON parsing failed: {str(e)}", level="WARNING")
-            
-            # Log more detailed error information
-            error_context = cleaned_content
-            if hasattr(e, 'pos'):
-                start = max(0, e.pos - 50)
-                end = min(len(cleaned_content), e.pos + 50)
-                error_context = f"...{cleaned_content[start:e.pos]}>>>ERROR HERE>>>{cleaned_content[e.pos:end]}..."
-            
-            add_debug_log(model_name, run_id, f"JSON error context", level="ERROR", data=error_context)
-            
-            # Ask the model to fix its own JSON
-            fixed_json = ask_model_to_fix_json(content, str(e))
-            if fixed_json:
-                try:
-                    # Try parsing the AI-fixed JSON
-                    parsed_content = json.loads(fixed_json)
-                    add_debug_log(model_name, run_id, "Successfully parsed AI-fixed JSON", level="INFO")
-                    return parsed_content
-                except json.JSONDecodeError as fix_e:
-                    add_debug_log(model_name, run_id, f"AI-fixed JSON still has parsing issues: {str(fix_e)}", level="WARNING")
-            
-            # Try more aggressive JSON fixing approaches
-            try:
-                # Try with a JSON repair library if available
-                try:
-                    import json5
-                    add_debug_log(model_name, run_id, "Attempting to parse with json5", level="DEBUG")
-                    parsed_content = json5.loads(cleaned_content)
-                    add_debug_log(model_name, run_id, "Successfully parsed with json5", level="INFO")
-                    return parsed_content
-                except ImportError:
-                    add_debug_log(model_name, run_id, "json5 library not available", level="DEBUG")
-                
-                # Manual JSON fixing for common issues
-                fixed_content = cleaned_content
-                
-                # Fix unterminated strings by looking for quotes without matching pairs
-                quote_positions = [i for i, char in enumerate(fixed_content) if char == '"' and (i == 0 or fixed_content[i-1] != '\\')]
-                if len(quote_positions) % 2 == 1:  # Odd number of quotes means unterminated string
-                    last_quote = quote_positions[-1]
-                    fixed_content = fixed_content[:last_quote+1] + '"' + fixed_content[last_quote+1:]
-                    add_debug_log(model_name, run_id, "Fixed unterminated string", level="DEBUG", data=fixed_content)
-                
-                # Try parsing the fixed content
-                parsed_content = json.loads(fixed_content)
-                add_debug_log(model_name, run_id, "Successfully parsed after fixing", level="INFO")
-                return parsed_content
-            except Exception as fix_error:
-                add_debug_log(model_name, run_id, f"JSON fixing failed: {str(fix_error)}", level="ERROR")
-            
-            # If that fails, try to extract JSON from the text
-            json_match = re.search(r'\{.*\}', cleaned_content, re.DOTALL)
-            if json_match:
-                json_str = json_match.group()
-                add_debug_log(model_name, run_id, "Found JSON in text using regex")
-                add_debug_log(model_name, run_id, "Extracted JSON", level="DEBUG", data=json_str)
-                
-                try:
-                    return json.loads(json_str)
-                except json.JSONDecodeError:
-                    # Last resort: try to create a minimal valid JSON with the company data
-                    add_debug_log(model_name, run_id, "Attempting to extract company data pattern", level="DEBUG")
-                    companies = []
-                    # Look for patterns like "Rank": 1, "Company Name": "Example"
-                    company_pattern = r'"Rank"\s*:\s*(\d+).*?"Company Name"\s*:\s*"([^"]+)".*?"URL"\s*:\s*"([^"]+)".*?"Commentary[^"]*"\s*:\s*"([^"]+)"'
-                    matches = re.finditer(company_pattern, content, re.DOTALL)
-                    
-                    for match in matches:
-                        companies.append({
-                            "Rank": int(match.group(1)),
-                            "Company Name": match.group(2),
-                            "URL": match.group(3),
-                            "Commentary on Differentiators": match.group(4)
-                        })
-                    
-                    if companies:
-                        result = {"companies": companies}
-                        add_debug_log(model_name, run_id, f"Created minimal JSON with {len(companies)} companies", level="INFO")
-                        return result
-                    
-                    add_debug_log(model_name, run_id, "Could not extract company data", level="ERROR")
-                    return None
-            else:
-                add_debug_log(model_name, run_id, "Could not find valid JSON in response", level="ERROR")
-                return None
     except Exception as e:
-        add_debug_log(model_name, run_id, f"API Error: {str(e)}", level="ERROR")
-        return None
-
-# Function to call Google
-def call_google(prompt, run_id=None):
-    model_name = "Gemini"
-    add_debug_log(model_name, run_id, f"Starting request to {model_name} with model: {google_model}")
-    
-    try:
-        # Add JSON formatting instructions for Google
-        formatted_prompt = add_json_instructions(prompt)
-        
-        model = genai.GenerativeModel(google_model)
-        response = model.generate_content(formatted_prompt)
-        
-        add_debug_log(model_name, run_id, "Response received")
-        
-        if not response or not response.text:
-            add_debug_log(model_name, run_id, "Empty response received", level="ERROR")
-            return None
-        
-        content = response.text.strip()
-        
-        # Log the response content
-        add_debug_log(model_name, run_id, "Response preview", data=content[:500] + ('...' if len(content) > 500 else ''))
-        add_debug_log(model_name, run_id, "Full response", level="DEBUG", data=content)
-        
-        # Try to parse the JSON response
-        try:
-            parsed_content = json.loads(content)
-            add_debug_log(model_name, run_id, "Successfully parsed JSON response")
-            return parsed_content
-        except json.JSONDecodeError as e:
-            add_debug_log(model_name, run_id, f"JSON parsing failed: {str(e)}", level="WARNING")
-            # If that fails, try to extract JSON from the text
-            import re
-            json_match = re.search(r'\{.*\}', content, re.DOTALL)
-            if json_match:
-                json_str = json_match.group()
-                add_debug_log(model_name, run_id, "Found JSON in text using regex")
-                add_debug_log(model_name, run_id, "Extracted JSON", level="DEBUG", data=json_str)
-                
-                return json.loads(json_str)
-            else:
-                add_debug_log(model_name, run_id, "Could not find valid JSON in response", level="ERROR")
-                return None
-    except Exception as e:
-        add_debug_log(model_name, run_id, f"API Error: {str(e)}", level="ERROR")
+        add_debug_log(model_name, run_id, f"Structuring error: {str(e)}", level="ERROR")
         return None
 
 # Function to normalize URLs (extract just the domain)
@@ -517,56 +336,36 @@ if st.button("Research Companies"):
                             
                             # Execute the query without displaying debug output
                             try:
-                                # Call the appropriate model
+                                # Call the appropriate model to get raw text response
+                                raw_result = None
                                 if model_name == "OpenAI":
-                                    result = call_openai(get_prompt(query), run_id)
+                                    raw_result = call_openai(get_prompt(query), run_id)
                                 elif model_name == "Claude":
-                                    result = call_anthropic(get_prompt(query), run_id)
+                                    raw_result = call_anthropic(get_prompt(query), run_id)
                                 else:  # Gemini
-                                    result = call_google(get_prompt(query), run_id)
+                                    raw_result = call_google(get_prompt(query), run_id)
                                 
-                                # Process the result if valid
-                                if result:
-                                    run_statuses[run_num].success(f"Run {run_num}/{runs_per_model}: Complete ✅")
+                                # Process the raw result if valid
+                                if raw_result:
+                                    # Now structure the raw response using OpenAI
+                                    structured_result = structure_response(raw_result, run_id, model_name)
                                     
-                                    # Process the result based on its format
-                                    df = pd.DataFrame()
-                                    
-                                    if model_name == "OpenAI" and "companies" in result:
-                                        df = pd.DataFrame(result["companies"])
-                                    elif "companies" in result:
-                                        df = pd.DataFrame(result["companies"])
-                                    elif isinstance(result, list):
-                                        df = pd.DataFrame(result)
-                                    elif result:
-                                        df = pd.DataFrame([result])
-                                    
-                                    # Add source metadata to the results
-                                    if not df.empty:
-                                        # Normalize column names
-                                        column_map = {}
-                                        for col in df.columns:
-                                            if col.lower() == "rank":
-                                                column_map[col] = "Rank"
-                                            elif col.lower() in ["company", "company name", "name"]:
-                                                column_map[col] = "Company Name"
-                                            elif col.lower() in ["url", "website", "link"]:
-                                                column_map[col] = "URL"
-                                            elif col.lower() in ["commentary", "differentiators", "commentary on differentiators"]:
-                                                column_map[col] = "Commentary on Differentiators"
+                                    if structured_result and "companies" in structured_result:
+                                        run_statuses[run_num].success(f"Run {run_num}/{runs_per_model}: Complete ✅")
                                         
-                                        # Rename columns if needed
-                                        if column_map:
-                                            df.rename(columns=column_map, inplace=True)
+                                        # Create dataframe from structured result
+                                        df = pd.DataFrame(structured_result["companies"])
                                         
-                                        # Add source information
+                                        # Add source metadata to the results
                                         df["Source Model"] = model_name
                                         df["Run Number"] = run_num
                                         
                                         # Add to all results
                                         all_results_list.append(df)
+                                    else:
+                                        run_statuses[run_num].error(f"Run {run_num}/{runs_per_model}: Failed to structure response ❌")
                                 else:
-                                    run_statuses[run_num].error(f"Run {run_num}/{runs_per_model}: Failed ❌ (No valid results)")
+                                    run_statuses[run_num].error(f"Run {run_num}/{runs_per_model}: Failed ❌ (No valid response)")
                             except Exception as e:
                                 run_statuses[run_num].error(f"Run {run_num}/{runs_per_model}: Error ❌ ({str(e)[:50]}...)")
                                 add_debug_log(model_name, run_id, f"Exception during processing: {str(e)}", level="ERROR")
@@ -680,7 +479,7 @@ if st.button("Research Companies"):
                     stats_df = pd.DataFrame(url_stats.values())
                     if not stats_df.empty:
                         stats_df = stats_df.sort_values(by=["Visibility Score", "Appearance %", "Average Rank"], 
-                                                       ascending=[False, False, True])
+                                                   ascending=[False, False, True])
                         
                         # Display the consolidated results
                         filter_text = ", ".join(selected_models) if "All" not in selected_models else "All Models"
@@ -890,7 +689,7 @@ if st.session_state.has_run_query and st.session_state.all_results is not None:
         stats_df = pd.DataFrame(url_stats.values())
         if not stats_df.empty:
             stats_df = stats_df.sort_values(by=["Visibility Score", "Appearance %", "Average Rank"], 
-                                           ascending=[False, False, True])
+                                       ascending=[False, False, True])
             
             # Display the consolidated results
             filter_text = ", ".join(selected_models) if "All" not in selected_models else "All Models"
