@@ -39,6 +39,10 @@ if 'all_results' not in st.session_state:
     st.session_state.all_results = None
 if 'has_run_query' not in st.session_state:
     st.session_state.has_run_query = False
+if 'intended_total_runs' not in st.session_state: # Initialize intended runs
+    st.session_state.intended_total_runs = 0
+if 'actual_completed_runs' not in st.session_state: # Initialize actual completed runs
+    st.session_state.actual_completed_runs = 0
 
 # Function to add a log entry
 def add_debug_log(model, run_id, message, level="INFO", data=None):
