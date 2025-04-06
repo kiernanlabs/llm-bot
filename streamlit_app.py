@@ -4,7 +4,7 @@ import json
 from openai import OpenAI
 from anthropic import Anthropic
 import google.generativeai as genai
-from google.generativeai.types import Tool, GenerateContentConfig, GoogleSearch
+from google.genai.types import Tool, GenerateContentConfig, GoogleSearch
 import urllib.parse
 import re
 import concurrent.futures
