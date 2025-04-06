@@ -3,7 +3,7 @@ import pandas as pd
 import json
 from openai import OpenAI
 from anthropic import Anthropic
-import google.generativeai as genai
+from google import genai
 from google.genai.types import Tool, GenerateContentConfig, GoogleSearch
 import urllib.parse
 import re
