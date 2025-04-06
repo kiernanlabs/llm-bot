@@ -4,6 +4,7 @@ import json
 from openai import OpenAI
 from anthropic import Anthropic
 import google.generativeai as genai
+from google.generativeai.types import Tool, GenerateContentConfig, GoogleSearch
 import urllib.parse
 import re
 import concurrent.futures
@@ -13,7 +14,7 @@ from datetime import datetime
 # Initialize API clients using Streamlit secrets
 openai_client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 anthropic_client = Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
-genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
+genai_client = genai.Client(api_key=st.secrets["GOOGLE_API_KEY"])
 
 # Set page config
 st.set_page_config(
@@ -152,23 +153,43 @@ def call_google(prompt, run_id=None):
     add_debug_log(model_name, run_id, f"Starting request to {model_name} with model: {google_model}")
     
     try:
-        # Simple call to Google API
-        model = genai.GenerativeModel(google_model)
-        response = model.generate_content(prompt)
+        # Set up Google Search tool for grounding
+        google_search_tool = Tool(
+            google_search=GoogleSearch()
+        )
+        
+        # Configure and call Gemini API with Google Search grounding
+        response = genai_client.models.generate_content(
+            model=google_model,
+            contents=prompt,
+            config=GenerateContentConfig(
+                tools=[google_search_tool],
+                response_modalities=["TEXT"],
+            )
+        )
         
         add_debug_log(model_name, run_id, "Response received")
         
-        if not response or not response.text:
+        if not response or not response.candidates or not response.candidates[0].content.parts:
             add_debug_log(model_name, run_id, "Empty response received", level="ERROR")
             return None
         
-        content = response.text.strip()
+        # Extract text from the response
+        content = response.candidates[0].content.parts[0].text.strip()
         
         # Log the response content
         add_debug_log(model_name, run_id, "Response preview", data=content[:500] + ('...' if len(content) > 500 else ''))
         add_debug_log(model_name, run_id, "Full response", level="DEBUG", data=content)
         
-        # Return the raw text response, no JSON parsing here
+        # Log grounding metadata if available
+        try:
+            if response.candidates[0].grounding_metadata and response.candidates[0].grounding_metadata.search_entry_point:
+                grounding_content = response.candidates[0].grounding_metadata.search_entry_point.rendered_content
+                add_debug_log(model_name, run_id, "Grounding metadata", level="DEBUG", data=grounding_content)
+        except (AttributeError, IndexError):
+            add_debug_log(model_name, run_id, "No grounding metadata available", level="INFO")
+        
+        # Return the text response
         return content
     
     except Exception as e:
@@ -288,6 +309,7 @@ if st.button("Research Companies"):
     if query:
         # Set flag to indicate query is running
         st.session_state.has_run_query = True
+        st.session_state.just_ran_query = True
         
         with st.spinner("Researching companies using multiple AI models..."):
             # Create layout for different sections
@@ -578,11 +600,15 @@ if st.button("Research Companies"):
                                 st.code(log["data"])
                 else:
                     st.info("No logs matching the selected filters.")
-    else:
-        st.warning("Please enter a research query.")
-        
+        else:
+            st.warning("Please enter a research query.")
+
+# Reset the just_ran_query flag for the next rerun
+if st.session_state.get('just_ran_query', True):
+    st.session_state.just_ran_query = False
+
 # Display results if they exist in session state (for when filters change)
-if st.session_state.has_run_query and st.session_state.all_results is not None:
+if st.session_state.has_run_query and st.session_state.all_results is not None and not st.session_state.get('just_ran_query', False):
     # Create tabs layout again (needed since we're outside the button click)
     tab1, tab2 = st.tabs(["Research Results", "Debug Logs"])
     
