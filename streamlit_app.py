@@ -600,8 +600,6 @@ if st.button("Research Companies"):
                                 st.code(log["data"])
                 else:
                     st.info("No logs matching the selected filters.")
-        else:
-            st.warning("Please enter a research query.")
 
 # Reset the just_ran_query flag for the next rerun
 if st.session_state.get('just_ran_query', True):
