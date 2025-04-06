@@ -283,6 +283,62 @@ def structure_response(raw_text, run_id=None, source_model=None):
         add_debug_log(model_name, run_id, f"Structuring error: {str(e)}", level="ERROR")
         return None
 
+# NEW FUNCTION: Summarize Differentiators using OpenAI
+def summarize_differentiators(commentaries_dict, run_id=None):
+    model_name = "OpenAI-Summarizer"
+    add_debug_log(model_name, run_id, f"Summarizing differentiators", level="INFO")
+    
+    # Format commentaries into a single block
+    commentary_text = "\n\n".join([f"Source: {source}\nCommentary: {text}" for source, text in commentaries_dict.items()])
+    
+    if not commentary_text:
+        add_debug_log(model_name, run_id, "No commentaries provided to summarize.", level="WARNING")
+        return "No commentary provided."
+
+    # Create the summarization prompt
+    summarize_prompt = f"""
+    Read the following commentaries provided by different AI models about a specific company. 
+    Based *only* on the text provided, identify and return exactly four distinct, single-word key differentiators for this company.
+    
+    Format the output as a comma-separated list of four single words. Example: Word1, Word2, Word3, Word4
+    
+    Do not add any explanation or introductory text.
+    
+    Commentaries:
+    ```
+    {commentary_text}
+    ```
+    
+    Four single-word differentiators (comma-separated):
+    """
+    
+    try:
+        # Use a small model for summarization
+        summarize_model = "gpt-4o-mini-2024-07-18"
+        
+        # Use Chat Completions for simple text generation
+        response = openai_client.chat.completions.create(
+            model=summarize_model,
+            messages=[{"role": "user", "content": summarize_prompt}],
+            max_tokens=50, # Limit output length
+            temperature=0.2 # Lower temperature for more focused output
+        )
+        
+        summary = response.choices[0].message.content.strip()
+        
+        # Basic validation: check if it looks like comma-separated words
+        if len(summary.split(',')) >= 3 and ' ' not in summary.split(',')[0].strip(): # Crude check
+            add_debug_log(model_name, run_id, f"Successfully summarized differentiators: {summary}", level="INFO")
+            return summary
+        else:
+            add_debug_log(model_name, run_id, f"Summarization format unexpected: {summary}", level="WARNING")
+            # Fallback or attempt to clean? For now, return raw output.
+            return summary # Or return a more specific error/default
+
+    except Exception as e:
+        add_debug_log(model_name, run_id, f"Summarization error: {str(e)}", level="ERROR")
+        return "Summarization failed."
+
 # Function to normalize URLs (extract just the domain)
 def normalize_url(url):
     try:
@@ -318,8 +374,9 @@ if st.button("Research Companies"):
             
             # Set number of runs per model
             runs_per_model = st.session_state.runs_per_model
-            total_runs = runs_per_model * 3  # 3 models (OpenAI, Claude, Gemini)
-            
+            intended_total_runs = runs_per_model * 3  # 3 models (OpenAI, Claude, Gemini)
+            st.session_state.intended_total_runs = intended_total_runs # Store intended total
+
             # Initialize results containers
             all_results_list = []
             
@@ -349,7 +406,7 @@ if st.button("Research Companies"):
                             run_id = f"{model_name}_run{run_num}"
                             
                             # Update status
-                            status_text.text(f"Processing: {model_name} - Run {run_num}/{runs_per_model} ({completed_runs+1}/{total_runs} total)")
+                            status_text.text(f"Processing: {model_name} - Run {run_num}/{runs_per_model} ({completed_runs+1}/{intended_total_runs} total)")
                             run_statuses[run_num].info(f"Run {run_num}/{runs_per_model}: In Progress...")
                             
                             # Execute the query without displaying debug output
@@ -390,10 +447,10 @@ if st.button("Research Companies"):
                             
                             # Update progress
                             completed_runs += 1
-                            progress_bar.progress(completed_runs / total_runs)
+                            progress_bar.progress(completed_runs / intended_total_runs)
                 
                 # Clear the primary progress indicators when done
-                status_text.text(f"✅ Processing complete! {completed_runs}/{total_runs} runs finished")
+                status_text.text(f"✅ Processing complete! {completed_runs}/{intended_total_runs} runs finished")
                 
                 # Add a separator between progress and results
                 st.markdown("---")
@@ -407,9 +464,14 @@ if st.button("Research Companies"):
                     
                     # Store in session state for persistence
                     st.session_state.all_results = all_results
+
+                    # Calculate ACTUAL completed runs
+                    actual_completed_runs = len(all_results.groupby(['Source Model', 'Run Number']).size())
+                    st.session_state.actual_completed_runs = actual_completed_runs
                 else:
                     # If no results, set session state accordingly
                     st.session_state.all_results = None 
+                    st.session_state.actual_completed_runs = 0 # No runs completed
                     st.error("All model runs failed to return valid results. Check debug logs for details.")
 
             # Update the debug logs tab
@@ -493,9 +555,9 @@ if st.session_state.has_run_query and st.session_state.all_results is not None a
         summary_cols = st.columns(3)
         
         runs_per_model = st.session_state.runs_per_model
-        total_runs = runs_per_model * len(all_results["Source Model"].unique())
+        total_runs = st.session_state.intended_total_runs
         total_companies = all_results["Normalized URL"].nunique()
-        completed_runs = len(all_results) // 10  # Estimate based on typical results
+        completed_runs = st.session_state.actual_completed_runs
         
         summary_cols[0].metric("Completed Runs", f"{completed_runs}/{total_runs}")
         summary_cols[1].metric("Unique Companies", f"{total_companies}")
@@ -564,6 +626,10 @@ if st.session_state.has_run_query and st.session_state.all_results is not None a
                 model_run = f"{row['Source Model']} (Run {row['Run Number']})"
                 commentaries[model_run] = row["Commentary on Differentiators"]
             
+            # NEW: Summarize the collected commentaries
+            summary_run_id = f"summary_{norm_url.replace('.', '_')[:20]}" # Create a simple ID for logging
+            summarized_differentiators = summarize_differentiators(commentaries, summary_run_id)
+
             # Store the stats
             url_stats[norm_url] = {
                 "Company Name": company_name,
@@ -573,7 +639,8 @@ if st.session_state.has_run_query and st.session_state.all_results is not None a
                 "Appearance %": appearance_pct,
                 "Average Rank": avg_rank,
                 "Visibility Score": visibility_score,
-                "Commentaries": commentaries
+                # "Commentaries": commentaries, # Removed raw commentaries
+                "Summarized Differentiators": summarized_differentiators # Added summary
             }
         
         # Convert to dataframe and sort
@@ -588,7 +655,8 @@ if st.session_state.has_run_query and st.session_state.all_results is not None a
             
             # Display the table
             for _, row in stats_df.iterrows():
-                cols = st.columns([3, 1, 1, 1, 2])
+                # Adjusted column widths for summary
+                cols = st.columns([3, 1, 1, 1, 3]) 
                 
                 # Column 1: Company Name and URL
                 cols[0].markdown(f"**{row['Company Name']}**")
@@ -603,12 +671,9 @@ if st.session_state.has_run_query and st.session_state.all_results is not None a
                 # Column 4: Visibility Score
                 cols[3].metric("Visibility", f"{row['Visibility Score']:.0f}")
                 
-                # Column 5: Commentaries Expander
-                with cols[4].expander("View Differentiators"):
-                    for model_run, commentary in row["Commentaries"].items():
-                        st.markdown(f"**{model_run}:**")
-                        st.markdown(commentary)
-                        st.markdown("---")
+                # Column 5: Display summarized differentiators
+                cols[4].markdown("**Key Differentiators:**")
+                cols[4].markdown(row['Summarized Differentiators'])
             
             # Display raw data for debugging
             with st.expander("View Raw Data"):
