@@ -398,6 +398,20 @@ if st.button("Research Companies"):
                 # Add a separator between progress and results
                 st.markdown("---")
 
+                # Combine all results if any were successful
+                if all_results_list:
+                    all_results = pd.concat(all_results_list, ignore_index=True)
+                    
+                    # Add normalized URL for grouping
+                    all_results["Normalized URL"] = all_results["URL"].apply(normalize_url)
+                    
+                    # Store in session state for persistence
+                    st.session_state.all_results = all_results
+                else:
+                    # If no results, set session state accordingly
+                    st.session_state.all_results = None 
+                    st.error("All model runs failed to return valid results. Check debug logs for details.")
+
             # Update the debug logs tab
             with tab2:
                 st.markdown("### Debug Logs")
